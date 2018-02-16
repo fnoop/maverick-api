@@ -39,6 +39,14 @@
   <body>
     <div id="graphiql">Loading...</div>
     <script>
+      var querySuffix = '/graphql'
+      var subscriptionsSuffix = '/subscriptions'
+      // Work out base name
+      var pathFrags = location.pathname.split("/graphiql")
+      var basePath = location.origin + pathFrags[0]
+      var queryPath = basePath + querySuffix
+      var subscriptionsPath = basePath.replace(/^https?/i, 'ws') + subscriptionsSuffix
+      
       // Collect the URL parameters
       var parameters = {};
       window.location.search.substr(1).split('&').forEach(function (entry) {
@@ -68,14 +76,14 @@
         }
       }
 
-      var subscriptionsClient = new window.SubscriptionsTransportWs.SubscriptionClient('ws://dev.maverick.one/maverick-api/subscriptions', {
+      var subscriptionsClient = new window.SubscriptionsTransportWs.SubscriptionClient(subscriptionsPath, {
         reconnect: true
       });
 
       var graphQLWSFetcher = subscriptionsClient.request.bind(subscriptionsClient);
 
       // We don't use safe-serialize for location, because it's not client input.
-      var fetchURL = locationQuery(otherParams, 'graphql');
+      var fetchURL = locationQuery(otherParams, queryPath);
 
       // Defines a GraphQL fetcher using the fetch API.
       function graphQLHttpFetcher(graphQLParams) {
