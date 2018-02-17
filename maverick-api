@@ -36,6 +36,7 @@ from api.schema import schema
 from api.schema import UpdateStateMessage, UpdateVfrHudMessage
 from api.schema import UpdatePoseStampedMessage, UpdateNavSatFixMessage
 from api.schema import UpdateImuMessage
+from api.schema import UpdateParameter
 
 # ROS imports
 import rospy
@@ -223,6 +224,7 @@ class Connection(object):
     def __init__(self):
         self.connect()
         self.topics()
+        self.params()
         self.listener()
 
     def connect(self):
@@ -242,6 +244,20 @@ class Connection(object):
         topics = rospy.get_published_topics()
         for topic in topics:
             print(topic)
+            
+    def params(self):
+        from mavros.utils import *
+        from mavros.param import *
+        import numbers
+        
+        mavros.set_namespace("mavros")
+        param_received, param_list = param_get_all(False)
+        print("Parameters received:", param_received)
+        
+        for param in param_list:
+            kwargs = {'id':param.param_id,'value':param.param_value,'is_float':isinstance(param.param_value, numbers.Integral)}
+            external_fn_queue.put_nowait((UpdateParameter().mutate, kwargs))
+            # print param.param_value, type(param.param_value), param.param_id
     
     def state_callback(self, data):
         kwargs = {'seq':data.header.seq,'frame_id':data.header.frame_id,'guided':data.guided,

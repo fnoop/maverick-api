@@ -2,6 +2,16 @@ from __future__ import absolute_import
 import graphene
 from rx.subjects import Subject
 
+import logging
+from logging.handlers import RotatingFileHandler
+logger = logging.getLogger('schema')
+hdlr = RotatingFileHandler('schema.log', mode='a', maxBytes=5*1024*1024, backupCount=2, encoding=None, delay=0)
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+hdlr.setFormatter(formatter)
+logger.addHandler(hdlr) 
+logger.setLevel(logging.DEBUG)
+
+
 class StreamState:
     stream={} # this dict holds the current telem message data for each message type
 
@@ -12,38 +22,37 @@ class Parameters:
     params={}
     
 
-class ParameterBase(graphene.Interface):
+class Parameter(graphene.ObjectType):
     id = graphene.ID()
-    
-class ParameterFloat(graphene.ObjectType):
-    class Meta:
-        interfaces = (ParameterBase, )
     value = graphene.Float()
-    
-    @classmethod
-    def create(cls, id, value):
-        _id = 'State'
-        param_float = cls(id=id, value=value)
-        # update the local storage content
-        Parameters.params[id] = param_float
-        return param_float
+    is_float = graphene.Boolean()
 
-class ParameterInt(graphene.ObjectType):
-    class Meta:
-        interfaces = (ParameterBase, )
-    value = graphene.Int()
-    
     @classmethod
-    def create(cls, id, value):
-        _id = 'State'
-        param_int = cls(id=id, value=value)
+    def create(cls, id, value, is_float):
+        param = cls(id=id, value=value, is_float=is_float)
         # update the local storage content
-        Parameters.params[id] = param_int
-        return param_int
+        if value:
+            Parameters.params[id] = param
+        return param
+
+class UpdateParameter(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID()
+        value = graphene.Float()
+        is_float = graphene.Boolean()
         
-class ParameterCollection(graphene.ObjectType):
-    params = graphene.List(ParameterBase)
+    ok = graphene.Boolean()
+    param = graphene.Field(lambda: Parameter)
+    
+    def mutate(self, info = None, **kwargs):
+        param = Parameter.create(**kwargs)
+        ok = True
+        # notify subscribers of an update
+        Subscriptions.stream['Param'].on_next(param) 
+        return UpdateParameter(param=param, ok=ok)
 
+class ParameterCollection(graphene.ObjectType):
+    params = graphene.List(Parameter)
 
 class TelemMessage(graphene.Interface):
     id = graphene.ID()
@@ -303,6 +312,7 @@ class Mutation(graphene.ObjectType):
     update_pose_stamped_message = UpdatePoseStampedMessage.Field()
     update_nav_sat_fix_message = UpdateNavSatFixMessage.Field()
     update_imu_message = UpdateImuMessage.Field()
+    update_param = UpdateParameter.Field()
 
 class Query(graphene.ObjectType):
     state_message = graphene.Field(StateMessage)
@@ -310,12 +320,24 @@ class Query(graphene.ObjectType):
     pose_stamped_message = graphene.Field(PoseStampedMessage)
     nav_sat_fix_message = graphene.Field(NavSatFixMessage)
     imu_message = graphene.Field(ImuMessage)
+    params = graphene.List(Parameter, query=graphene.List(graphene.String))
     
-    params = graphene.List(ParameterBase)
-    def resolve_params(self, info):
-        tmp =[Parameters.params['testing'],Parameters.params['abcd']]
-        print tmp
-        return tmp
+    def resolve_params(self, info, query= ['*']):
+        # logger.debug('{0}'.format(Parameters.params))
+        logger.debug('{0}'.format(query))
+        # TODO:
+        # what we need to do here is parse the search query and return a
+        # filtered list of parameters
+        # * is a wildcard, query should be case insensitive
+        # for now just handle the wild card and known parameter requests
+        param_list = []
+        for q in query:
+            if q == "*":
+                param_list = Parameters.params.values()
+                return param_list
+            else:
+                param_list.append(Parameters.params.get(q.upper(), Parameter().create(q.upper(), None, None)))
+        return param_list
     
     def resolve_state_message(self, info):
         return StreamState.stream['State']
@@ -356,7 +378,7 @@ class Subscription(graphene.ObjectType):
         return Subscriptions.stream['Imu']
         
 
-schema = graphene.Schema(query=Query, mutation=Mutation, subscription=Subscription, types=[ParameterFloat, ParameterInt])
+schema = graphene.Schema(query=Query, mutation=Mutation, subscription=Subscription)
 
 state_message = StateMessage(
     id='State',
@@ -432,9 +454,6 @@ imu_message = ImuMessage(
     linear_acceleration_z = None, # graphene.Float()
 )
 
-ParameterFloat().create('testing', 123.45)
-ParameterInt().create('abcd', 100001)
-
 # init the state message
 StreamState.stream['State'] = state_message
 # init the VfrHud message
@@ -452,3 +471,4 @@ Subscriptions.stream['VfrHud'] = Subject()
 Subscriptions.stream['PoseStamped'] = Subject()
 Subscriptions.stream['NavSatFix'] = Subject()
 Subscriptions.stream['Imu'] = Subject()
+Subscriptions.stream['Param'] = Subject()
