@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 import graphene
 from rx.subjects import Subject
+import re, fnmatch
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -47,6 +48,9 @@ class UpdateParameter(graphene.Mutation):
     def mutate(self, info = None, **kwargs):
         param = Parameter.create(**kwargs)
         ok = True
+        # TODO: set mavros param here?
+        # also need to verify the set command worked as requested
+        
         # notify subscribers of an update
         Subscriptions.stream['Param'].on_next(param) 
         return UpdateParameter(param=param, ok=ok)
@@ -325,17 +329,27 @@ class Query(graphene.ObjectType):
     def resolve_params(self, info, query= ['*']):
         # logger.debug('{0}'.format(Parameters.params))
         logger.debug('{0}'.format(query))
-        # TODO:
-        # what we need to do here is parse the search query and return a
-        # filtered list of parameters
-        # * is a wildcard, query should be case insensitive
-        # for now just handle the wild card and known parameter requests
         param_list = []
         for q in query:
             if q == "*":
+                # we want all the parameters
                 param_list = Parameters.params.values()
                 return param_list
+            elif "*" in q:
+                # the query contains at least one wildcard
+                logger.debug('pre re: {0}'.format(q))
+                # create a regular expression from a unix style wildcard pattern
+                regex = fnmatch.translate(q.upper())
+                logger.debug('post re: {0}'.format(regex))
+                # compile the regular expression for speed
+                reobj = re.compile(regex)
+                for id in Parameters.params:
+                    # check to see if pattern is present and the matched parameter is not already in our param_list
+                    if (reobj.match(id) and Parameters.params[id] not in param_list):
+                        param_list.append(Parameters.params[id])
             else:
+                # try to match the supplied id against the parameter list
+                # if I cant be found return the query id with a null value
                 param_list.append(Parameters.params.get(q.upper(), Parameter().create(q.upper(), None, None)))
         return param_list
     

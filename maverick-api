@@ -246,6 +246,8 @@ class Connection(object):
             print(topic)
             
     def params(self):
+        # TODO: remove wildcard imports and support setting params
+        # e.g. ret = param_set("SERIAL1_BAUD", 57)
         from mavros.utils import *
         from mavros.param import *
         import numbers
