@@ -18,7 +18,7 @@ else:
 import logging
 from logging.handlers import RotatingFileHandler
 logger = logging.getLogger('websocket')
-hdlr = RotatingFileHandler('tornado_ws.log', mode='a', maxBytes=5*1024*1024, backupCount=2, encoding=None, delay=0)
+hdlr = RotatingFileHandler('tornado_ws.log', mode='a', maxBytes=1*1024*1024, backupCount=2, encoding=None, delay=0)
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 hdlr.setFormatter(formatter)
 logger.addHandler(hdlr) 

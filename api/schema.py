@@ -1,12 +1,12 @@
 from __future__ import absolute_import
 import graphene
 from rx.subjects import Subject
-import re, fnmatch
+import re, fnmatch, numbers
 
 import logging
 from logging.handlers import RotatingFileHandler
 logger = logging.getLogger('schema')
-hdlr = RotatingFileHandler('schema.log', mode='a', maxBytes=5*1024*1024, backupCount=2, encoding=None, delay=0)
+hdlr = RotatingFileHandler('schema.log', mode='a', maxBytes=1*1024*1024, backupCount=2, encoding=None, delay=0)
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 hdlr.setFormatter(formatter)
 logger.addHandler(hdlr) 
@@ -20,8 +20,8 @@ class Subscriptions:
     stream={} # this dict holds Subject() for each message type
     
 class Parameters:
-    params={}
-    
+    params = {}
+    callback = None
 
 class Parameter(graphene.ObjectType):
     id = graphene.ID()
@@ -31,9 +31,6 @@ class Parameter(graphene.ObjectType):
     @classmethod
     def create(cls, id, value, is_float):
         param = cls(id=id, value=value, is_float=is_float)
-        # update the local storage content
-        if value:
-            Parameters.params[id] = param
         return param
 
 class UpdateParameter(graphene.Mutation):
@@ -44,17 +41,25 @@ class UpdateParameter(graphene.Mutation):
         
     ok = graphene.Boolean()
     param = graphene.Field(lambda: Parameter)
-    
+
     def mutate(self, info = None, **kwargs):
-        param = Parameter.create(**kwargs)
-        ok = True
-        # TODO: set mavros param here?
-        # also need to verify the set command worked as requested
+        # logger.debug('info {0}'.format(info))
+        if (info and Parameters.callback):
+            # we only have info if the graphql mutate call was made from the
+            # browser (not maverick-api directly)
+            ret_val = Parameters.callback(kwargs)
+            # TODO: need to verify the set command worked as requested
+            kwargs['value'] = ret_val
+            kwargs['is_float'] = not isinstance(ret_val, numbers.Integral)
         
+        param = Parameter.create(**kwargs)
+        # add / update the param in the local storage
+        Parameters.params[kwargs['id']] = param
+        ok = True
         # notify subscribers of an update
         Subscriptions.stream['Param'].on_next(param) 
-        return UpdateParameter(param=param, ok=ok)
-
+        return UpdateParameter(param=param, ok=ok) 
+        
 class ParameterCollection(graphene.ObjectType):
     params = graphene.List(Parameter)
 
@@ -327,9 +332,10 @@ class Query(graphene.ObjectType):
     params = graphene.List(Parameter, query=graphene.List(graphene.String))
     
     def resolve_params(self, info, query= ['*']):
-        # logger.debug('{0}'.format(Parameters.params))
-        logger.debug('{0}'.format(query))
+        # logger.debug('test: {0}'.format(Parameters.params))
         param_list = []
+        # TODO: check to see if we have a valid parameter list
+        # raise error if its empty / wrong
         for q in query:
             if q == "*":
                 # we want all the parameters
@@ -337,10 +343,10 @@ class Query(graphene.ObjectType):
                 return param_list
             elif "*" in q:
                 # the query contains at least one wildcard
-                logger.debug('pre re: {0}'.format(q))
+                # logger.debug('pre re: {0}'.format(q))
                 # create a regular expression from a unix style wildcard pattern
                 regex = fnmatch.translate(q.upper())
-                logger.debug('post re: {0}'.format(regex))
+                # logger.debug('post re: {0}'.format(regex))
                 # compile the regular expression for speed
                 reobj = re.compile(regex)
                 for id in Parameters.params:
@@ -349,8 +355,10 @@ class Query(graphene.ObjectType):
                         param_list.append(Parameters.params[id])
             else:
                 # try to match the supplied id against the parameter list
-                # if I cant be found return the query id with a null value
-                param_list.append(Parameters.params.get(q.upper(), Parameter().create(q.upper(), None, None)))
+                # if it cant be found return the query id with a null value
+                param = Parameters.params.get(q.upper(), Parameter().create(q.upper(), None, None))
+                if param not in param_list:
+                    param_list.append(param)
         return param_list
     
     def resolve_state_message(self, info):

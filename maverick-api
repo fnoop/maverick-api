@@ -53,6 +53,23 @@ from geometry_msgs.msg import PoseStamped
 external_fn_queue = queue.Queue()
 external_fn_executor = ThreadPoolExecutor(max_workers=1)
 
+
+# setup logging
+handler = RotatingFileHandler('tornado.log', mode='a', maxBytes=1*1024*1024, backupCount=2, encoding=None, delay=0)
+enable_pretty_logging()
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+handler.setFormatter(formatter)
+access_log = logging.getLogger("tornado.access")
+app_log = logging.getLogger("tornado.application")
+gen_log = logging.getLogger("tornado.general")
+app_log.addHandler(handler)
+gen_log.addHandler(handler)
+access_log.addHandler(handler)
+# TODO: log level set by config
+app_log.setLevel(logging.DEBUG)
+gen_log.setLevel(logging.DEBUG)
+access_log.setLevel(logging.DEBUG)
+
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 APP_STATIC = os.path.join(APP_ROOT, 'static')
 # TODO: group the settings and make configurable
@@ -140,22 +157,6 @@ class ExternalFunctionCallback(object):
                 callback(**kwargs)
             else:
                 break
-            
-def setup_logging(config):
-    handler = RotatingFileHandler('tornado.log', mode='a', maxBytes=5*1024*1024, backupCount=2, encoding=None, delay=0)
-    enable_pretty_logging()
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-    handler.setFormatter(formatter)
-    access_log = logging.getLogger("tornado.access")
-    app_log = logging.getLogger("tornado.application")
-    gen_log = logging.getLogger("tornado.general")
-    app_log.addHandler(handler)
-    gen_log.addHandler(handler)
-    access_log.addHandler(handler)
-    # TODO: log level set by config
-    app_log.setLevel(logging.DEBUG)
-    gen_log.setLevel(logging.DEBUG)
-    access_log.setLevel(logging.DEBUG)
     
 def start_server(config):
     application = TornadoQL(config)
@@ -166,7 +167,6 @@ def start_server(config):
     return server
 
 def main(config):
-    setup_logging(config)
     external_callback = ExternalFunctionCallback()
     server = start_server(config)
     tornado.ioloop.IOLoop.current().start()
@@ -246,8 +246,11 @@ class Connection(object):
             print(topic)
             
     def params(self):
-        # TODO: remove wildcard imports and support setting params
-        # e.g. ret = param_set("SERIAL1_BAUD", 57)
+        # TODO: remove wildcard imports
+        
+        from api.schema import Parameters
+        Parameters.callback = self.param_set_callback
+        
         from mavros.utils import *
         from mavros.param import *
         import numbers
@@ -257,10 +260,35 @@ class Connection(object):
         print("Parameters received:", param_received)
         
         for param in param_list:
-            kwargs = {'id':param.param_id,'value':param.param_value,'is_float':isinstance(param.param_value, numbers.Integral)}
+            kwargs = {'id':param.param_id,'value':param.param_value,'is_float':not isinstance(param.param_value, numbers.Integral)}
             external_fn_queue.put_nowait((UpdateParameter().mutate, kwargs))
-            # print param.param_value, type(param.param_value), param.param_id
-    
+            # app_log.debug('param {0}:{1}  {2}'.format(param.param_id, param.param_value, type(param.param_value)))
+            
+    def param_set_callback(self, param_data):
+        from api.schema import Parameters
+        # TODO: remove wildcard imports
+        # write unit test
+        # clean up logic
+        from mavros.utils import *
+        from mavros.param import *
+        import numbers
+        
+        mavros.set_namespace("mavros")
+
+        ret = param_set(param_data['id'], param_data['value'])
+        # if ret == param_value:
+        #     # param set worked
+        #     pass
+        # else:
+        #     # param set failed
+        #     pass
+        
+        # # check to see if the set value matches the provided value
+        # ret_param = param_get(param_data['id'])
+        # app_log.debug('param set {0}:{1}  {2}'.format(param_data['id'], param_value, ret, ret_param))
+        # app_log.debug('{0}'.format(ret_param))
+        return ret
+        
     def state_callback(self, data):
         kwargs = {'seq':data.header.seq,'frame_id':data.header.frame_id,'guided':data.guided,
                   'nsecs':data.header.stamp.nsecs,'system_status':data.system_status,'secs':data.header.stamp.secs,
