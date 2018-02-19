@@ -85,5 +85,5 @@ if __name__ == '__main__':
     vehicle = random.choice(vehicles)
     print(vehicle)
     meta = get_param_meta(vehicle, remote = True)
-    print(meta)
+    print(meta.keys())
     

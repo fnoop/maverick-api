@@ -24,7 +24,6 @@ class Parameters:
     meta = {}
     callback = None
 
-
 class ParamMetaInputSchema(graphene.InputObjectType):
     human_name = graphene.String()
     user = graphene.String()
@@ -49,11 +48,10 @@ class ParameterMeta(graphene.ObjectType):
         return self.get('documentation')
     
     def resolve_values(self,  info):
-        return self.get('values')#json.dumps(self.get('values'))
+        return self.get('values')
     
     def resolve_fields(self, info):
-        return self.get('fields')#json.dumps(self.get('fields'))
-
+        return self.get('fields')
 
 class Parameter(graphene.ObjectType):
     id = graphene.ID()
@@ -62,7 +60,7 @@ class Parameter(graphene.ObjectType):
     meta = graphene.Field(ParameterMeta)
     
     def resolve_meta(self, info):
-        return Parameters.meta[self.id]
+        return Parameters.meta.get(self.id, None)
 
     @classmethod
     def create(cls, id, value, is_float):
@@ -95,7 +93,6 @@ class UpdateParameter(graphene.Mutation):
         # notify subscribers of an update
         Subscriptions.stream['Param'].on_next(param) 
         return UpdateParameter(param=param, ok=ok) 
-        
 
 class TelemMessage(graphene.Interface):
     id = graphene.ID()
@@ -364,10 +361,8 @@ class Query(graphene.ObjectType):
     nav_sat_fix_message = graphene.Field(NavSatFixMessage)
     imu_message = graphene.Field(ImuMessage)
     params = graphene.List(Parameter, meta = ParamMetaInputSchema(), query=graphene.List(graphene.String))
-    param_meta = graphene.Field(ParameterMeta, id = graphene.String())
     
     def resolve_params(self, info, query= ['*']):
-        # logger.debug('test: {0}'.format(Parameters.params))
         param_list = []
         # TODO: check to see if we have a valid parameter list
         # raise error if its empty / wrong
@@ -532,4 +527,3 @@ Subscriptions.stream['PoseStamped'] = Subject()
 Subscriptions.stream['NavSatFix'] = Subject()
 Subscriptions.stream['Imu'] = Subject()
 Subscriptions.stream['Param'] = Subject()
-Subscriptions.stream['ParamMeta'] = Subject()
