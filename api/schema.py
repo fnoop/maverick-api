@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 import graphene
 from rx.subjects import Subject
-import re, fnmatch, numbers
+import re, fnmatch, numbers, json
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -21,12 +21,48 @@ class Subscriptions:
     
 class Parameters:
     params = {}
+    meta = {}
     callback = None
+
+
+class ParamMetaInputSchema(graphene.InputObjectType):
+    human_name = graphene.String()
+    user = graphene.String()
+    documentation = graphene.String()
+    values = graphene.types.json.JSONString()
+    fields = graphene.types.json.JSONString()
+
+class ParameterMeta(graphene.ObjectType):
+    human_name = graphene.String()
+    user = graphene.String()
+    documentation = graphene.String()
+    values = graphene.types.json.JSONString()
+    fields = graphene.types.json.JSONString()
+
+    def resolve_human_name(self, info):
+        return self.get('humanName')
+        
+    def resolve_user(self,info):
+        return self.get('user')
+        
+    def resolve_documentation(self, info):
+        return self.get('documentation')
+    
+    def resolve_values(self,  info):
+        return self.get('values')#json.dumps(self.get('values'))
+    
+    def resolve_fields(self, info):
+        return self.get('fields')#json.dumps(self.get('fields'))
+
 
 class Parameter(graphene.ObjectType):
     id = graphene.ID()
     value = graphene.Float()
     is_float = graphene.Boolean()
+    meta = graphene.Field(ParameterMeta)
+    
+    def resolve_meta(self, info):
+        return Parameters.meta[self.id]
 
     @classmethod
     def create(cls, id, value, is_float):
@@ -60,8 +96,6 @@ class UpdateParameter(graphene.Mutation):
         Subscriptions.stream['Param'].on_next(param) 
         return UpdateParameter(param=param, ok=ok) 
         
-class ParameterCollection(graphene.ObjectType):
-    params = graphene.List(Parameter)
 
 class TelemMessage(graphene.Interface):
     id = graphene.ID()
@@ -329,7 +363,8 @@ class Query(graphene.ObjectType):
     pose_stamped_message = graphene.Field(PoseStampedMessage)
     nav_sat_fix_message = graphene.Field(NavSatFixMessage)
     imu_message = graphene.Field(ImuMessage)
-    params = graphene.List(Parameter, query=graphene.List(graphene.String))
+    params = graphene.List(Parameter, meta = ParamMetaInputSchema(), query=graphene.List(graphene.String))
+    param_meta = graphene.Field(ParameterMeta, id = graphene.String())
     
     def resolve_params(self, info, query= ['*']):
         # logger.debug('test: {0}'.format(Parameters.params))
@@ -497,3 +532,4 @@ Subscriptions.stream['PoseStamped'] = Subject()
 Subscriptions.stream['NavSatFix'] = Subject()
 Subscriptions.stream['Imu'] = Subject()
 Subscriptions.stream['Param'] = Subject()
+Subscriptions.stream['ParamMeta'] = Subject()
