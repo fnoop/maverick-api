@@ -340,7 +340,7 @@ class Query(graphene.ObjectType):
             if q == "*":
                 # we want all the parameters
                 param_list = Parameters.params.values()
-                return param_list
+                return sorted(param_list, key=lambda param: param.id)
             elif "*" in q:
                 # the query contains at least one wildcard
                 # logger.debug('pre re: {0}'.format(q))
@@ -357,10 +357,11 @@ class Query(graphene.ObjectType):
                 # try to match the supplied id against the parameter list
                 # if it cant be found return the query id with a null value
                 param = Parameters.params.get(q.upper(), Parameter().create(q.upper(), None, None))
+                # logger.debug('param dir: {0} {1}'.format(param.id, dir(param)))
                 if param not in param_list:
                     param_list.append(param)
-        return param_list
-    
+        return sorted(param_list, key=lambda param: param.id)
+        
     def resolve_state_message(self, info):
         return StreamState.stream['State']
         
@@ -375,7 +376,6 @@ class Query(graphene.ObjectType):
     
     def resolve_imu_message(self, info):
         return StreamState.stream['Imu']
-        
   
 class Subscription(graphene.ObjectType):
     state_message = graphene.Field(StateMessage)
@@ -399,7 +399,8 @@ class Subscription(graphene.ObjectType):
     def resolve_imu_message(self, info):
         return Subscriptions.stream['Imu']
         
-
+        
+        
 schema = graphene.Schema(query=Query, mutation=Mutation, subscription=Subscription)
 
 state_message = StateMessage(
