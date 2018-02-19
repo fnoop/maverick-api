@@ -383,6 +383,7 @@ class Subscription(graphene.ObjectType):
     pose_stamped_message = graphene.Field(PoseStampedMessage)
     nav_sat_fix_message = graphene.Field(NavSatFixMessage)
     imu_message = graphene.Field(ImuMessage)
+    params = graphene.Field(Parameter)
 
     def resolve_state_message(self, info):
         return Subscriptions.stream['State']
@@ -399,7 +400,8 @@ class Subscription(graphene.ObjectType):
     def resolve_imu_message(self, info):
         return Subscriptions.stream['Imu']
         
-        
+    def resolve_params(self, info):
+        return Subscriptions.stream['Param']
         
 schema = graphene.Schema(query=Query, mutation=Mutation, subscription=Subscription)
 
