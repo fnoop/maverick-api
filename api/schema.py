@@ -12,7 +12,6 @@ hdlr.setFormatter(formatter)
 logger.addHandler(hdlr) 
 logger.setLevel(logging.DEBUG)
 
-
 class StreamState:
     stream={} # this dict holds the current telem message data for each message type
 
@@ -30,28 +29,33 @@ class ParamMetaInputSchema(graphene.InputObjectType):
     documentation = graphene.String()
     values = graphene.types.json.JSONString()
     fields = graphene.types.json.JSONString()
-
+    group = graphene.String()
+    
 class ParameterMeta(graphene.ObjectType):
     human_name = graphene.String()
     user = graphene.String()
     documentation = graphene.String()
     values = graphene.types.json.JSONString()
     fields = graphene.types.json.JSONString()
+    group = graphene.String()
 
     def resolve_human_name(self, info):
-        return self.get('humanName')
+        return self.get('humanName', None)
         
     def resolve_user(self,info):
-        return self.get('user')
+        return self.get('user', None)
         
     def resolve_documentation(self, info):
-        return self.get('documentation')
+        return self.get('documentation', None)
     
-    def resolve_values(self,  info):
-        return self.get('values')
+    def resolve_values(self, info):
+        return self.get('values', None)
     
     def resolve_fields(self, info):
-        return self.get('fields')
+        return self.get('fields', None)
+    
+    def resolve_group(self, info):
+        return self.get('group', None)
 
 class Parameter(graphene.ObjectType):
     id = graphene.ID()

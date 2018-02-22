@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 import pprint
 import requests
 import random
+import enum
 
 vehicles = ['APMrover2', 'ArduCopter', 'ArduPlane', 'ArduSub', 'AntennaTracker']
 
@@ -63,9 +64,10 @@ def get_param_meta(vehicle, remote = True):
                 curr_param_dict = {'humanName':sub.attrib.get('humanName', None),
                 'user':sub.attrib.get('user', None), 'fields':{}, 'values':{}, 'documentation':sub.attrib.get('documentation', None)}
             elif sub.tag == 'field':
-                curr_param_dict['fields'][sub.attrib['name']]=sub.text
+                curr_param_dict['fields'][sub.attrib['name'].strip()]=sub.text.strip()
             elif sub.tag == 'value':
-                curr_param_dict['values'][sub.attrib['code']]=sub.text
+                ### FIXME
+                curr_param_dict['values'][sub.attrib['code'].strip()]=sub.text.strip()
             else:
                 pass
                 # print sub.tag, sub.attrib, sub.text
@@ -78,12 +80,24 @@ def get_param_meta(vehicle, remote = True):
     meta = {}
     for param_group in root:
         for param in root[param_group].keys():
-            meta[param] = root[param_group][param]
+            param_meta = root[param_group][param]
+            # dont use param_group here in order to avoid vehicle name as group
+            param_meta['group'] = param.split('_')[0].strip().rstrip('_').upper()
+            if not param_meta['values']:
+                # its empty, set to none
+                param_meta['values'] = None
+            if not param_meta['fields']:
+                # its empty, set to none
+                param_meta['fields'] = None
+                
+            meta[param] = param_meta
+            
+            
     return meta
     
 if __name__ == '__main__':
     vehicle = random.choice(vehicles)
     print(vehicle)
     meta = get_param_meta(vehicle, remote = True)
-    print(meta.keys())
+    print(meta)
     
