@@ -1,7 +1,13 @@
 from __future__ import absolute_import
 import graphene
+from graphene.types import Scalar
+from graphql.language import ast
+
 from rx.subjects import Subject
 import re, fnmatch, numbers, json
+
+from decimal import *
+
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -22,6 +28,33 @@ class Parameters:
     params = {}
     meta = {}
     callback = None
+    
+### start graphql param value type
+class ParamValueType(Scalar):
+    @staticmethod
+    def serialize(value):
+        # logger.debug('serialize {0}  {1}'.format(value, type(value)))
+        if isinstance(value, numbers.Integral):
+            return str(value)
+        else:
+            try:
+                value = round(value, 6)
+                return format(Decimal(str(value)), 'f')
+                # return format(round(value, 5), 'f')
+            except Exception as e:
+                logger.error('serialize failed {0}:{1} {2}'.format(value, type(value), e))
+    
+    @staticmethod
+    def parse_value(value):
+        # logger.debug('parse_value {0}  {1}'.format(value, type(value)))
+        return value
+        
+    @staticmethod
+    def parse_literal(value_ast):
+        # logger.debug('parse_literal {0}  {1}'.format(value_ast, type(value)))
+        if isinstance(value_ast, (ast.StringValue, ast.IntValue, ast.FloatValue)):
+            return value_ast.value
+### end graphql param value type
 
 class ParamMetaInputSchema(graphene.InputObjectType):
     human_name = graphene.String()
@@ -59,23 +92,21 @@ class ParameterMeta(graphene.ObjectType):
 
 class Parameter(graphene.ObjectType):
     id = graphene.ID()
-    value = graphene.Float()
-    is_float = graphene.Boolean()
+    value = ParamValueType()
     meta = graphene.Field(ParameterMeta)
     
     def resolve_meta(self, info):
         return Parameters.meta.get(self.id, None)
 
     @classmethod
-    def create(cls, id, value, is_float):
-        param = cls(id=id, value=value, is_float=is_float)
+    def create(cls, id, value):
+        param = cls(id=id, value=value)
         return param
 
 class UpdateParameter(graphene.Mutation):
     class Arguments:
         id = graphene.ID()
-        value = graphene.Float()
-        is_float = graphene.Boolean()
+        value = ParamValueType()
         
     ok = graphene.Boolean()
     param = graphene.Field(lambda: Parameter)
@@ -88,8 +119,7 @@ class UpdateParameter(graphene.Mutation):
             ret_val = Parameters.callback(kwargs)
             # TODO: need to verify the set command worked as requested
             kwargs['value'] = ret_val
-            kwargs['is_float'] = not isinstance(ret_val, numbers.Integral)
-        
+            
         param = Parameter.create(**kwargs)
         # add / update the param in the local storage
         Parameters.params[kwargs['id']] = param
@@ -377,10 +407,8 @@ class Query(graphene.ObjectType):
                 return sorted(param_list, key=lambda param: param.id)
             elif "*" in q:
                 # the query contains at least one wildcard
-                # logger.debug('pre re: {0}'.format(q))
                 # create a regular expression from a unix style wildcard pattern
                 regex = fnmatch.translate(q.upper())
-                # logger.debug('post re: {0}'.format(regex))
                 # compile the regular expression for speed
                 reobj = re.compile(regex)
                 for id in Parameters.params:
@@ -390,8 +418,7 @@ class Query(graphene.ObjectType):
             else:
                 # try to match the supplied id against the parameter list
                 # if it cant be found return the query id with a null value
-                param = Parameters.params.get(q.upper(), Parameter().create(q.upper(), None, None))
-                # logger.debug('param dir: {0} {1}'.format(param.id, dir(param)))
+                param = Parameters.params.get(q.upper(), Parameter.create(q.upper(), None,))
                 if param not in param_list:
                     param_list.append(param)
         return sorted(param_list, key=lambda param: param.id)

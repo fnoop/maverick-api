@@ -4,7 +4,6 @@ import xml.etree.ElementTree as ET
 import pprint
 import requests
 import random
-import enum
 
 vehicles = ['APMrover2', 'ArduCopter', 'ArduPlane', 'ArduSub', 'AntennaTracker']
 
@@ -66,7 +65,6 @@ def get_param_meta(vehicle, remote = True):
             elif sub.tag == 'field':
                 curr_param_dict['fields'][sub.attrib['name'].strip()]=sub.text.strip()
             elif sub.tag == 'value':
-                ### FIXME
                 curr_param_dict['values'][sub.attrib['code'].strip()]=sub.text.strip()
             else:
                 pass
