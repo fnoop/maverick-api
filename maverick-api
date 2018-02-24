@@ -255,10 +255,8 @@ class Connection(object):
         Parameters.meta = get_param_meta(vehicle)
         
         
-        from mavros.utils import *
-        from mavros.param import *
-        import numbers, decimal
-        from decimal import *
+        # from mavros.utils import 
+        from mavros.param import param_get_all
         
         mavros.set_namespace("mavros")
         param_received, param_list = param_get_all(False)
@@ -274,13 +272,10 @@ class Connection(object):
         # TODO: remove wildcard imports
         # write unit test
         # clean up logic
-        from mavros.utils import *
-        from mavros.param import *
-        import numbers
+        from mavros.param import param_set
         
         mavros.set_namespace("mavros")
-
-        ret = param_set(param_data['id'], param_data['value'])
+        ret = param_set(param_data['id'].encode('ascii','ignore'), float(param_data['value']))
         # if ret == param_value:
         #     # param set worked
         #     pass
