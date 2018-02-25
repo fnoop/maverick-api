@@ -247,20 +247,15 @@ class Connection(object):
             
     def params(self):
         vehicle = 'ArduCopter'
-        # TODO: remove wildcard imports and make vehicle dynamic
+        # TODO: make vehicle dynamic
         from param.parse_param_xml import get_param_meta
-        
         from api.schema import Parameters
+        from mavros.param import param_get_all
         Parameters.callback = self.param_set_callback
         Parameters.meta = get_param_meta(vehicle)
-        
-        
-        # from mavros.utils import 
-        from mavros.param import param_get_all
-        
         mavros.set_namespace("mavros")
         param_received, param_list = param_get_all(False)
-        print("Parameters received:", param_received)
+        app_log.debug('Parameters received: {0}'.format(param_received))
                 
         for param in param_list:
             kwargs = {'id':param.param_id,'value':param.param_value}
