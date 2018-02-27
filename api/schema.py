@@ -116,7 +116,7 @@ class UpdateParameter(graphene.Mutation):
         if (info and Parameters.callback):
             # we only have info if the graphql mutate call was made from the
             # browser (not maverick-api directly)
-            ret_val = Parameters.callback(kwargs)
+            ret_val = Parameters.callback(kwargs) # this calls param set
             # TODO: need to verify the set command worked as requested
             kwargs['value'] = ret_val
             

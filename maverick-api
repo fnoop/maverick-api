@@ -20,11 +20,11 @@ import queue
 from uuid import uuid4 # used to generate unique IDs
 import datetime
 
+
 # tornado imports
 import tornado.web
 from tornado import gen
 from tornado.log import enable_pretty_logging
-
 from concurrent.futures import ThreadPoolExecutor
 
 # tornadoql imports
@@ -38,6 +38,9 @@ from api.schema import UpdatePoseStampedMessage, UpdateNavSatFixMessage
 from api.schema import UpdateImuMessage
 from api.schema import UpdateParameter
 
+# utility imports
+from util.common import merge_two_dicts
+
 # ROS imports
 import rospy
 import mavros
@@ -46,6 +49,7 @@ from std_msgs.msg import String
 from mavros_msgs.msg import State, VFR_HUD
 from sensor_msgs.msg import NavSatFix, Imu
 from geometry_msgs.msg import PoseStamped
+from mavros_maverick.msg import Param # callboack msg on param change
 
 # zeroconf placeholder
 # from zeroconf import ServiceInfo, Zeroconf # advertise available websockets to browser
@@ -188,6 +192,7 @@ class Server(object):
         self.exit = False
         (self.opts, self.args) = optsargs
         self.server_thread = None
+        self.connection = None
         # TODO: fix this config mess... 
         self.config = Configuration(self.opts.configuration)
         self.config = self.config.get_config()
@@ -214,12 +219,13 @@ class Server(object):
     def exit_gracefully(self, signum, frame):
         '''called on sigterm'''
         self.exit = True
-        self.connection.shutdown()
+        if self.connection:
+            self.connection.shutdown()
         if self.server_thread:
             # attempt to shutdown the tornado server
             request_server_stop(self.config)
             self.server_thread.join(timeout=10)
-            
+
 class Connection(object):
     def __init__(self):
         self.connect()
@@ -239,6 +245,7 @@ class Connection(object):
         rospy.Subscriber("/mavros/global_position/global", NavSatFix, self.nav_sat_fix_callback)
         rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.pose_stamped_callback)
         rospy.Subscriber("/mavros/imu/data", Imu, self.imu_callback)
+        rospy.Subscriber("/mavros/param_value", Param, self.param_callback)
     
     def topics(self):
         topics = rospy.get_published_topics()
@@ -252,15 +259,20 @@ class Connection(object):
         from api.schema import Parameters
         from mavros.param import param_get_all
         Parameters.callback = self.param_set_callback
-        Parameters.meta = get_param_meta(vehicle)
         mavros.set_namespace("mavros")
         param_received, param_list = param_get_all(False)
         app_log.debug('Parameters received: {0}'.format(param_received))
                 
+        param_meta_vehicle = {}
         for param in param_list:
             kwargs = {'id':param.param_id,'value':param.param_value}
             external_fn_queue.put_nowait((UpdateParameter().mutate, kwargs))
+            param_meta_vehicle[param.param_id] = {'group':param.param_id.split('_')[0].strip().rstrip('_').upper()}
             # app_log.debug('param {0}:{1}  {2}'.format(param.param_id, param.param_value, type(param.param_value)))
+        
+         # TODO: handle IOError when mavlink-router is not connected to the AP but mavros is running
+        param_meta_server = get_param_meta(vehicle)
+        Parameters.meta = merge_two_dicts(param_meta_vehicle, param_meta_server)
                 
     def param_set_callback(self, param_data):
         from api.schema import Parameters
@@ -305,7 +317,8 @@ class Connection(object):
     def pose_stamped_callback(self, data):
         kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id,
                   'pose_position_x':data.pose.position.x,  'pose_position_y':data.pose.position.y,  'pose_position_z':data.pose.position.z,
-                  'pose_orientation_x':data.pose.orientation.x,  'pose_orientation_y':data.pose.orientation.y,  'pose_orientation_z':data.pose.orientation.z, 'pose_orientation_w':data.pose.orientation.w}
+                  'pose_orientation_x':data.pose.orientation.x,  'pose_orientation_y':data.pose.orientation.y,  'pose_orientation_z':data.pose.orientation.z,
+                  'pose_orientation_w':data.pose.orientation.w}
         external_fn_queue.put_nowait((UpdatePoseStampedMessage().mutate, kwargs))
     
     def imu_callback(self, data):
@@ -314,6 +327,11 @@ class Connection(object):
                   'angular_velocity_x':data.angular_velocity.x, 'angular_velocity_y':data.angular_velocity.y, 'angular_velocity_z':data.angular_velocity.z,
                   'linear_acceleration_x':data.linear_acceleration.x, 'linear_acceleration_y':data.linear_acceleration.y, 'linear_acceleration_z':data.linear_acceleration.z}
         external_fn_queue.put_nowait((UpdateImuMessage().mutate, kwargs))
+    
+    def param_callback(self, data):
+        app_log.debug('Parameters callback received: {0}'.format(data))
+        kwargs = {'id':data.param_id,'value':data.param_value}
+        external_fn_queue.put_nowait((UpdateParameter().mutate, kwargs))
 
 if __name__ == '__main__':
     from optparse import OptionParser

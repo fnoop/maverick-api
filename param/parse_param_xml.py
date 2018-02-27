@@ -27,7 +27,12 @@ def get_param_meta(vehicle, remote = True):
     
     if remote:
         url = 'http://autotest.ardupilot.org/Parameters/{0}/apm.pdef.xml'.format(vehicle)
-        response = requests.get(url)
+        try:
+            response = requests.get(url)
+        except requests.exceptions.ConnectionError as e:
+            print('Could not retreive param meta data from remote server: {0} {1}'.format(url, e))
+            # TODO: fall back to previous saved version(s)
+            return {}
         tree = ET.fromstring(response.content)
     else:
         # TODO: fix this
