@@ -8,6 +8,7 @@ import re, fnmatch, numbers, json
 
 from decimal import *
 
+from tornado import gen
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -28,6 +29,10 @@ class Parameters:
     params = {}
     meta = {}
     callback = None
+    
+    @property
+    def param_count():
+        return len(Parameters.params)
     
 ### start graphql param value type
 class ParamValueType(Scalar):
@@ -112,7 +117,7 @@ class UpdateParameter(graphene.Mutation):
     param = graphene.Field(lambda: Parameter)
 
     def mutate(self, info = None, **kwargs):
-        # logger.debug('info {0}'.format(info))
+        # logger.debug('UpdateParameter.mutate() info:{0} kwargs:{1}'.format(info, kwargs))
         if (info and Parameters.callback):
             # we only have info if the graphql mutate call was made from the
             # browser (not maverick-api directly)
@@ -125,8 +130,9 @@ class UpdateParameter(graphene.Mutation):
         Parameters.params[kwargs['id']] = param
         ok = True
         # notify subscribers of an update
-        Subscriptions.stream['Param'].on_next(param) 
-        return UpdateParameter(param=param, ok=ok) 
+        Subscriptions.stream['Param'].on_next(param)
+        if info:
+            return UpdateParameter(param=param, ok=ok)
 
 class TelemMessage(graphene.Interface):
     id = graphene.ID()
@@ -171,11 +177,13 @@ class UpdateStateMessage(graphene.Mutation):
     state_message = graphene.Field(lambda: StateMessage)
     
     def mutate(self, info = None, **kwargs):
+        # logger.debug('UpdateStateMessage.mutate() info:{0} kwargs:{1}'.format(info, kwargs))
         state_message = StateMessage.create(**kwargs)
         ok = True
         # notify subscribers of an update
         Subscriptions.stream['State'].on_next(state_message) 
-        return UpdateStateMessage(state_message=state_message, ok=ok)
+        if info:
+            return UpdateStateMessage(state_message=state_message, ok=ok)
 ### end State Message
 
 ### start VfrHud Message
@@ -216,11 +224,13 @@ class UpdateVfrHudMessage(graphene.Mutation):
     vfr_hud_message = graphene.Field(lambda: VfrHudMessage)
     
     def mutate(self, info = None, **kwargs):
+        # logger.debug('UpdateVfrHudMessage.mutate() info:{0} kwargs:{1}'.format(info, kwargs))
         vfr_hud_message = VfrHudMessage.create(**kwargs)
         ok = True
         # notify subscribers of an update
         Subscriptions.stream['VfrHud'].on_next(vfr_hud_message)
-        return UpdateVfrHudMessage(vfr_hud_message=vfr_hud_message, ok=ok)
+        if info:
+            return UpdateVfrHudMessage(vfr_hud_message=vfr_hud_message, ok=ok)
 ### end VfrHud Message
 
 ### start PoseStamped Message
@@ -265,11 +275,14 @@ class UpdatePoseStampedMessage(graphene.Mutation):
     pose_stamped_message = graphene.Field(lambda: PoseStampedMessage)
     
     def mutate(self, info = None, **kwargs):
+        # logger.debug('start UpdatePoseStampedMessage.mutate() info:{0} kwargs:{1}'.format(info, kwargs))
         pose_stamped_message = PoseStampedMessage.create(**kwargs)
         ok = True
         # notify subscribers of an update
         Subscriptions.stream['PoseStamped'].on_next(pose_stamped_message)
-        return UpdatePoseStampedMessage(pose_stamped_message=pose_stamped_message, ok=ok)
+        if info:
+            return UpdatePoseStampedMessage(pose_stamped_message=pose_stamped_message, ok=ok)
+            
 ### end PoseStamped Message
 
 ### start Imu Message
@@ -330,7 +343,8 @@ class UpdateImuMessage(graphene.Mutation):
         ok = True
         # notify subscribers of an update
         Subscriptions.stream['Imu'].on_next(imu_message)
-        return UpdateImuMessage(imu_message=imu_message, ok=ok)
+        if info:
+            return UpdateImuMessage(imu_message=imu_message, ok=ok)
 ### end Imu Message
 
 ### start NavSatFix Message
@@ -377,7 +391,8 @@ class UpdateNavSatFixMessage(graphene.Mutation):
         ok = True
         # notify subscribers of an update
         Subscriptions.stream['NavSatFix'].on_next(nav_sat_fix_message)
-        return UpdateNavSatFixMessage(nav_sat_fix_message=nav_sat_fix_message, ok=ok)
+        if info:
+            return UpdateNavSatFixMessage(nav_sat_fix_message=nav_sat_fix_message, ok=ok)
 ### end NavSatFix Message
 
 class Mutation(graphene.ObjectType):

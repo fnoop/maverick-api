@@ -47,6 +47,7 @@ import mavros
 import mavros.utils
 from std_msgs.msg import String
 from mavros_msgs.msg import State, VFR_HUD
+from mavros_msgs.srv import StreamRate, StreamRateRequest
 from sensor_msgs.msg import NavSatFix, Imu
 from geometry_msgs.msg import PoseStamped
 from mavros_maverick.msg import Param # callboack msg on param change
@@ -161,6 +162,8 @@ class ExternalFunctionCallback(object):
                 callback(**kwargs)
             else:
                 break
+def add_ioloop_callback(method, **kwargs):
+    tornado.ioloop.IOLoop.current().add_callback(method, **kwargs)
     
 def start_server(config):
     application = TornadoQL(config)
@@ -171,19 +174,18 @@ def start_server(config):
     return server
 
 def main(config):
-    external_callback = ExternalFunctionCallback()
+    # external_callback = ExternalFunctionCallback()
     server = start_server(config)
     tornado.ioloop.IOLoop.current().start()
     # this function blocks at this point until the server is asked to exit via request_server_stop()
     if config['APP_DEBUG']:
         print("Tornado finished")
-    external_callback.stop()
+    # external_callback.stop()
     server.stop()
 
 def request_server_stop(config):
     # TODO: close all websocket connections (required?)
-    ioloop = tornado.ioloop.IOLoop.current()
-    ioloop.add_callback(ioloop.stop)
+    add_ioloop_callback(ioloop.stop)
     if config['APP_DEBUG']:
         print("Asked Tornado to exit")
     
@@ -229,16 +231,43 @@ class Server(object):
 class Connection(object):
     def __init__(self):
         self.connect()
-        self.topics()
+        # self.topics()
+        self.streams()
         self.params()
         self.listener()
 
     def connect(self):
         rospy.init_node('listener', anonymous=True, disable_signals=True)
-        
+        mavros.set_namespace("mavros")
+
     def shutdown(self):
         rospy.signal_shutdown('API Shutdown')
     
+    def streams(self):
+        # Create ROS service definition for StreamRate
+        set_rate = rospy.ServiceProxy(mavros.get_topic('set_stream_rate'), StreamRate)
+        # Define function to do the stream request
+        def do_set_rate(stream_rate, stream_id):
+            if stream_rate is not None:
+                try:
+                    set_rate(stream_id=stream_id, message_rate=stream_rate, on_off=(stream_rate != 0))
+                    app_log.debug('Set stream {} rate {}'.format(stream_id, stream_rate))
+                except rospy.ServiceException as ex:
+                    fault(ex)
+        # Request streams
+        stream_rates = {
+            'STREAM_RAW_SENSORS': 5,
+            'STREAM_EXTENDED_STATUS': 5,
+            'STREAM_RC_CHANNELS': 5,
+            'STREAM_RAW_CONTROLLER': 5,
+            'STREAM_POSITION': 5, # POSE
+            'STREAM_EXTRA1': 10, # IMU
+            'STREAM_EXTRA2': 5, # VFR_HUD
+            'STREAM_EXTRA3': 1
+        }
+        for stream,rate in stream_rates.items():
+            do_set_rate(rate, getattr(StreamRateRequest, stream))
+
     def listener(self):
         rospy.Subscriber("/mavros/state", State, self.state_callback)
         rospy.Subscriber("/mavros/vfr_hud", VFR_HUD, self.vfr_hud_callback)
@@ -250,33 +279,34 @@ class Connection(object):
     def topics(self):
         topics = rospy.get_published_topics()
         for topic in topics:
-            print(topic)
+            app_log.info(topic)
             
     def params(self):
         vehicle = 'ArduCopter'
-        # TODO: make vehicle dynamic
+        # TODO: make vehicle dynamic and chosse between px4 and ardupilot
         from param.parse_param_xml import get_param_meta
         from api.schema import Parameters
         from mavros.param import param_get_all
         Parameters.callback = self.param_set_callback
-        mavros.set_namespace("mavros")
         param_received, param_list = param_get_all(False)
         app_log.debug('Parameters received: {0}'.format(param_received))
                 
         param_meta_vehicle = {}
         for param in param_list:
             kwargs = {'id':param.param_id,'value':param.param_value}
-            external_fn_queue.put_nowait((UpdateParameter().mutate, kwargs))
+            # external_fn_queue.put_nowait((UpdateParameter().mutate, kwargs))
+            add_ioloop_callback(UpdateParameter().mutate, **kwargs)
+            
             param_meta_vehicle[param.param_id] = {'group':param.param_id.split('_')[0].strip().rstrip('_').upper()}
-            # app_log.debug('param {0}:{1}  {2}'.format(param.param_id, param.param_value, type(param.param_value)))
+            app_log.debug('param get {0}:{1}  {2}'.format(param.param_id, param.param_value, type(param.param_value)))
         
-         # TODO: handle IOError when mavlink-router is not connected to the AP but mavros is running
+        # TODO: handle IOError when mavlink-router is not connected to the AP but mavros is running
         param_meta_server = get_param_meta(vehicle)
         Parameters.meta = merge_two_dicts(param_meta_vehicle, param_meta_server)
                 
     def param_set_callback(self, param_data):
         from api.schema import Parameters
-        # TODO: remove wildcard imports
+        # TODO:
         # write unit test
         # clean up logic
         from mavros.param import param_set
@@ -292,7 +322,7 @@ class Connection(object):
         
         # # check to see if the set value matches the provided value
         # ret_param = param_get(param_data['id'])
-        # app_log.debug('param set {0}:{1}  {2}'.format(param_data['id'], param_value, ret, ret_param))
+        app_log.debug('param set {0}:{1}  {2}'.format(param_data['id'], param_data['value'], ret))
         # app_log.debug('{0}'.format(ret_param))
         return ret
         
@@ -300,38 +330,44 @@ class Connection(object):
         kwargs = {'seq':data.header.seq,'frame_id':data.header.frame_id,'guided':data.guided,
                   'nsecs':data.header.stamp.nsecs,'system_status':data.system_status,'secs':data.header.stamp.secs,
                   'connected':data.connected,'mode':data.mode,'armed':data.armed}
-        external_fn_queue.put_nowait((UpdateStateMessage().mutate, kwargs))
+        tornado.ioloop.IOLoop.current().add_callback(UpdateStateMessage().mutate, **kwargs)
+        # external_fn_queue.put_nowait((UpdateStateMessage().mutate, kwargs))
         
     def vfr_hud_callback(self, data):
         kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id,
                   'airspeed':data.airspeed, 'groundspeed':data.groundspeed, 'heading':data.heading,
                   'throttle':data.throttle, 'altitude':data.altitude, 'climb':data.climb}
-        external_fn_queue.put_nowait((UpdateVfrHudMessage().mutate, kwargs))
+        tornado.ioloop.IOLoop.current().add_callback(UpdateVfrHudMessage().mutate, **kwargs)
+        # external_fn_queue.put_nowait((UpdateVfrHudMessage().mutate, kwargs))
 
     def nav_sat_fix_callback(self, data):
         kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id,
                   'status_status':data.status.status, 'status_service':data.status.service, 'latitude':data.latitude, 'longitude':data.longitude,
                   'altitude':data.altitude, 'position_covariance_type':data.position_covariance_type}
-        external_fn_queue.put_nowait((UpdateNavSatFixMessage().mutate, kwargs))
+        tornado.ioloop.IOLoop.current().add_callback(UpdateNavSatFixMessage().mutate, **kwargs)
+        # external_fn_queue.put_nowait((UpdateNavSatFixMessage().mutate, kwargs))
 
     def pose_stamped_callback(self, data):
         kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id,
                   'pose_position_x':data.pose.position.x,  'pose_position_y':data.pose.position.y,  'pose_position_z':data.pose.position.z,
                   'pose_orientation_x':data.pose.orientation.x,  'pose_orientation_y':data.pose.orientation.y,  'pose_orientation_z':data.pose.orientation.z,
                   'pose_orientation_w':data.pose.orientation.w}
-        external_fn_queue.put_nowait((UpdatePoseStampedMessage().mutate, kwargs))
+        tornado.ioloop.IOLoop.current().add_callback(UpdatePoseStampedMessage().mutate, **kwargs)
+        # external_fn_queue.put_nowait((UpdatePoseStampedMessage().mutate, kwargs))
     
     def imu_callback(self, data):
         kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id,
                   'orientation_x':data.orientation.x, 'orientation_y':data.orientation.y, 'orientation_z':data.orientation.z, 'orientation_w':data.orientation.w,
                   'angular_velocity_x':data.angular_velocity.x, 'angular_velocity_y':data.angular_velocity.y, 'angular_velocity_z':data.angular_velocity.z,
                   'linear_acceleration_x':data.linear_acceleration.x, 'linear_acceleration_y':data.linear_acceleration.y, 'linear_acceleration_z':data.linear_acceleration.z}
-        external_fn_queue.put_nowait((UpdateImuMessage().mutate, kwargs))
+        tornado.ioloop.IOLoop.current().add_callback(UpdateImuMessage().mutate, **kwargs)
+        # external_fn_queue.put_nowait((UpdateImuMessage().mutate, kwargs))
     
     def param_callback(self, data):
-        app_log.debug('Parameters callback received: {0}'.format(data))
+        app_log.debug('param callback data: {0}  value type: {1} '.format(data, type(data.param_value)))
         kwargs = {'id':data.param_id,'value':data.param_value}
-        external_fn_queue.put_nowait((UpdateParameter().mutate, kwargs))
+        tornado.ioloop.IOLoop.current().add_callback(UpdateParameter().mutate, **kwargs)
+        # external_fn_queue.put_nowait((UpdateParameter().mutate, kwargs))
 
 if __name__ == '__main__':
     from optparse import OptionParser

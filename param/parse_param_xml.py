@@ -1,45 +1,93 @@
 #!/usr/bin/env python
 from __future__ import print_function
+if __name__ == '__main__' and __package__ is None:
+    from os import sys, path
+    sys.path.append(path.dirname(path.dirname(path.abspath(__file__))))
+
+from util.common import find, file_age_in_seconds
 import xml.etree.ElementTree as ET
 import pprint
 import requests
 import random
+import os
 
 vehicles = ['APMrover2', 'ArduCopter', 'ArduPlane', 'ArduSub', 'AntennaTracker']
 
-def find(key, dictionary):
-    '''Find all occurences of a key in nested python dictionaries and lists'''
-    # https://stackoverflow.com/questions/9807634/find-all-occurrences-of-a-key-in-nested-python-dictionaries-and-lists
-    for k, v in dictionary.iteritems():
-        if k == key:
-            yield v
-        elif isinstance(v, dict):
-            for result in find(key, v):
-                yield result
-        elif isinstance(v, list):
-            for d in v:
-                for result in find(key, d):
-                    yield result
-                    
-def get_param_meta(vehicle, remote = True):
-    if not vehicle in vehicles:
-        return False
-    
-    if remote:
-        url = 'http://autotest.ardupilot.org/Parameters/{0}/apm.pdef.xml'.format(vehicle)
-        try:
-            response = requests.get(url)
-        except requests.exceptions.ConnectionError as e:
-            print('Could not retreive param meta data from remote server: {0} {1}'.format(url, e))
-            # TODO: fall back to previous saved version(s)
-            return {}
-        tree = ET.fromstring(response.content)
+def get_ardupilot_url(vehicle):
+    return 'http://autotest.ardupilot.org/Parameters/{0}/apm.pdef.xml'.format(vehicle)
+
+def test_file_age(file_path, max_age):
+    sec = file_age_in_seconds(file_path)
+    if (sec is not None and sec <= max_age):
+        return True
     else:
-        # TODO: fix this
         return False
-        # with open('apm.pdef.xml', 'rt') as f:
-        #     tree = ET.parse(f)
+                    
+def get_param_meta(vehicle, remote = True, force_download = False, max_age = 60*10):
+    if not vehicle in vehicles:
+        # TODO: inform failure
+        return {}
+    if remote:
+        # check to see if we have a recent file from the server
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        file_path = os.path.join(dir_path, '{0}.xml'.format(vehicle))
+        if (not test_file_age(file_path, max_age) or force_download):
+            url = get_ardupilot_url(vehicle)
+            tree = download_param_meta(url)
+            
+            if tree is not None:
+                save_param_meta(tree, vehicle)
+            else:
+                # request for meta failed, try to fall back to saved file
+                # TODO: inform user
+                tree = load_param_meta(vehicle)
+        else:
+            tree = load_param_meta(vehicle)
+        return extract_param_meta_from_tree(tree, vehicle)
+    else:
+        # TODO: generate param meta from ardupilot code base
+        return extract_param_meta_from_tree(None, vehicle)
+        
+def save_param_meta(tree, file_name, dir_path = None):
+    if tree is None:
+        return False
+    if not dir_path:
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+    file_path = os.path.join(dir_path, '{0}.xml'.format(file_name))
+    param_meta_data = ET.tostring(tree)
+    print('Saving meta to {0}'.format(file_path))
+    with open(file_path, 'w') as fid:
+        fid.write(param_meta_data)
     
+def download_param_meta(url):
+    print('Downloading meta from {0}'.format(url))
+    tree = None
+    try:
+        response = requests.get(url)
+        tree = ET.fromstring(response.content)
+    except requests.exceptions.ConnectionError as e:
+        print('Could not retreive param meta data from remote server: {0} {1}'.format(url, e))
+    finally:
+        return tree
+        
+def load_param_meta(file_name, dir_path = None):
+    tree = None
+    if not dir_path:
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+    file_path = os.path.join(dir_path, '{0}.xml'.format(file_name))
+    print('Loading meta from {0}'.format(file_path))
+    try:
+        with open(file_path, 'rt') as f:
+            tree = ET.parse(f)
+        return tree
+    except IOError as e:
+        print('An error occurred while loading meta from {0} {1}'.format(file_path, e))
+        return None
+        
+def extract_param_meta_from_tree(tree, vehicle):
+    if tree is None:
+        print('Error: No valid tree')
+        return {}
     root = {}
     curr_param_dict = {}
     curr_param_name = ''
@@ -94,13 +142,20 @@ def get_param_meta(vehicle, remote = True):
                 param_meta['fields'] = None
                 
             meta[param] = param_meta
-            
-            
     return meta
+
+def download_and_save_all_param_meta():
+    for vehicle in vehicles:
+        url = get_ardupilot_url(vehicle)
+        tree = download_param_meta(url)
+        save_param_meta(tree, file_name = vehicle)
     
 if __name__ == '__main__':
+    from os import sys, path
+    sys.path.append(path.dirname(path.dirname(path.abspath(__file__))))
+    
     vehicle = random.choice(vehicles)
     print(vehicle)
     meta = get_param_meta(vehicle, remote = True)
-    print(meta)
-    
+    # print(meta)
+    # download_and_save_all_param_meta()

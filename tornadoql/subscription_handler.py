@@ -96,15 +96,12 @@ class GQLSubscriptionHandler(websocket.WebSocketHandler):
             message['payload'] = payload
 
         assert message, "You need to send at least one thing"
-        json_message = json_encode(message)
         
+        json_message = json_encode(message)
         # log the outgoing ws data to file
         logger.debug('send ws: ID: {0}, TYPE: {1}, PAYLOAD: {2}'.format( op_id, op_type, payload))
+        return self.write_message(json_message) # and here
         
-        return self.write_message(json_message)
-        
-
-
     def send_error(self, op_id, error, error_type=None):
         if error_type is None:
             error_type = GQL_ERROR
