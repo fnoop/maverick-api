@@ -3,65 +3,9 @@ from __future__ import print_function
 if __name__ == '__main__' and __package__ is None:
     from os import sys, path
     sys.path.append(path.dirname(path.dirname(path.abspath(__file__))))
-    
 
 from pymavlink import mavutil
-import fnmatch
-
-miss_cmds = {}
-frame_enum = {0: "Abs", 3: "Rel", 10: "AGL"}
-frame_enum_rev = {v:k for k,v in frame_enum.items()}
-
-# auto-generate the list of mission commands
-for cmd in mavutil.mavlink.enums['MAV_CMD']:
-    enum = mavutil.mavlink.enums['MAV_CMD'][cmd]
-    name = enum.name
-    name = name.replace('MAV_CMD_','')
-    if name == 'ENUM_END':
-        continue
-    miss_cmds[cmd] = name
-
-def cmd_reverse_lookup(command_name):
-    '''returns 0 if key not found'''
-    for key, value in miss_cmds.items():
-        if (value.upper() == command_name.upper()):
-            return key
-    return 0
-
-# a wildcard map from parameter descriptions to column names. If not found in this map
-# then the default "Pn" is used
-description_map = [
-    ('Empty'             , '-'),
-    ('Latitude*'         , 'Lat'),
-    ('Longitude*'        , 'Lon'),
-    ('Altitude*'         , 'Alt'),
-    ('Minimum pitch*'    , 'Pitch'),
-    ('Yaw*'              , 'Yaw'),
-    ('Desired yaw*'      , 'Yaw'),
-    ('Radius*'           , 'Radius'),
-    ('Turns*'            , 'Turns'),
-    ('Seconds*'          , 'Time(s)'),
-    ('Delay in seconds*' , 'Time(s)'),
-    ('On / Off*'         , 'Enable'),
-    ('Descent / Ascend'  , 'Rate'),
-    ('Finish Altitude'   , 'Altitude'),
-    ('Distance*'         , 'Distance'),
-    ('Mode*'             , 'Mode'),
-    ('Custom mode*'      , 'CustomMode'),
-    ('Sequence*'         , 'Seq'),
-    ('Repeat*'           , 'Repeat'),
-    ('Speed type*'       , 'SpeedType'),
-    ('Speed*'            , 'Speed'),
-    ('Throttle*'         , 'Throttle')
-    ]
-
-def make_column_label(command_name, description, default):
-    '''try to work out a reasonable column name from parameter description'''
-    for (pattern, label) in description_map:
-        if fnmatch.fnmatch(description, pattern):
-            return label
-    return default
-
+import pprint
 
 def get_column_labels(command_name):
     '''return dictionary of column labels if available'''
@@ -75,16 +19,44 @@ def get_column_labels(command_name):
     return labels
 
 if __name__ == '__main__':
+    mavlink_enums = {}
     for ent in mavutil.mavlink.enums: # MAV_CMD
         # if ent == 'MAV_CMD':
-        print(ent)
+        # print(ent)
+        enum_dict = {}
         for cmd in mavutil.mavlink.enums[ent]:
             enum = mavutil.mavlink.enums[ent][cmd]
             name = enum.name
             name = name.replace(ent+'_', '')
             if 'ENUM_END' in name:
                 continue
-            print(cmd, name)
-        print(' ')
+            enum_dict[name] = {'value':cmd, 'description':enum.description, 'param':enum.param}
+            if enum.param:
+                pass
+                # print(ent)
+        mavlink_enums[ent] = enum_dict
+        # print(' ')
+    # print(mavlink_enums.keys())
+    pprint.pprint(mavlink_enums['MAV_TYPE'])
         
-        # we can use pymavlink.mavutil helper functions to obtain mode numbers from vehicle type and autopilot type
+    # arduplane
+    mode_mapping_apm = mavutil.mode_mapping_apm
+    
+    # arducopter
+    mode_mapping_acm = mavutil.mode_mapping_acm
+    
+    # ardurover
+    mode_mapping_rover = mavutil.mode_mapping_rover
+    
+    # ardutracker
+    mode_mapping_tracker = mavutil.mode_mapping_tracker
+    
+    # ardusub
+    mode_mapping_sub = mavutil.mode_mapping_sub
+    
+    # PX4
+    mainstate_mapping_px4 = mavutil.mainstate_mapping_px4
+    
+    # print(mavutil.mavlink.MAV_AUTOPILOT_PX4)
+    # print(mavutil.mavlink.enums['MAV_AUTOPILOT'][3].description)
+    

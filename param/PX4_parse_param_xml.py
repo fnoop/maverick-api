@@ -9,7 +9,12 @@ import xml.etree.ElementTree as ET
 import pprint
 import requests
 import random
-import os
+import os, re
+import ast
+
+# define what will be encoded and sent to the web ui for a bool, True or 1 and False or 0
+bool_true = 1 # True
+bool_false = 0 # False
 
 def test_file_age(file_path, max_age):
     sec = file_age_in_seconds(file_path)
@@ -68,10 +73,8 @@ def load_param_meta(file_name, dir_path = None):
         print('An error occurred while loading meta from {0} {1}'.format(file_path, e))
         return None
 
-def extract_text(label, node, curr_param_dict):
-    curr_param_dict[label] = node.text.strip()
-    return curr_param_dict
-
+def extract_text(node):
+    return re.sub('\s+',' ',node.text) # replace newlines, tabs and white space with single space
 
 def extract_param_meta_from_tree(tree, vehicle):
     if tree is None:
@@ -89,26 +92,74 @@ def extract_param_meta_from_tree(tree, vehicle):
         for sub in group.iter():
             # the first element is the group tag itself
             if sub.tag == 'group':
-                if curr_param_dict: # we have already populated curr_param_dict, write it to the root and reset
-                    # this is not run on the first loop
-                    root[curr_param_dict['name'] = curr_param_dict
-                    curr_param_dict = {} # reset the param dict
                 curr_group_name = sub.attrib['name'] # we enforce that there is a group name
             elif sub.tag == 'parameter':
-                curr_param_dict = {'default_value':sub.attrib.get('default', None), 'name':sub.attrib.get('name', None),
-                                   'type':sub.attrib.get('type', None), 'group':curr_group_name,
-                                   'boolean':False, 'reboot_required':None, 'values':{}
+                if curr_param_dict: # we have already populated curr_param_dict, write it to the root and reset
+                    # this is not run on the first loop
+                    root[curr_param_name] = curr_param_dict
+                    curr_param_dict = {} # reset the param dict
+                    curr_param_name = ''
+                curr_param_name = sub.attrib.get('name').upper()
+                    
+                curr_param_dict = {'humanName':None, 'humanGroup':curr_group_name,
+                'rebootRequired':False, 'increment':None,
+                'unitText':None, 'units':None, 'min':None, 'max':None,
+                'values':None, 'documentation':None,
+                'bitmask':None, 'decimal':None, 'type':None
                 }
-            elif sub.tag in ['short_desc', 'long_desc', 'unit', 'decimal', 'min', 'max', 'reboot_required']:
-                curr_param_dict = extract_text(sub.tag, sub, curr_param_dict)
+                # get rid of lover case names! e.g. broken uavcan stuff
+
+                curr_param_dict['group'] = curr_param_name.split('_')[0].strip().rstrip('_').upper()
+                curr_param_type = sub.attrib.get('type').upper()
+                if 'INT' in curr_param_type:
+                    curr_param_dict['type'] = 'INTERGER'
+                else:
+                    curr_param_dict['type'] = curr_param_type
+                
+                
+            elif sub.tag in ['long_desc', 'unit', 'min', 'max', 'reboot_required',
+                            'increment', 'decimal', 'short_desc']:
+                tag_string = extract_text(sub)
+                if sub.tag == 'long_desc':
+                    curr_param_dict['documentation'] = tag_string
+                elif sub.tag == 'short_desc':
+                    curr_param_dict['humanName'] = tag_string
+                elif sub.tag == 'unit':
+                    curr_param_dict['units'] = tag_string
+                elif sub.tag == 'reboot_required':
+                    if 'TRUE' in tag_string.upper():
+                        curr_param_dict['rebootRequired'] = True
+                    else:
+                        curr_param_dict['rebootRequired'] = False
+                elif sub.tag == 'decimal':
+                    curr_param_dict['decimal'] = ast.literal_eval(tag_string)
+                elif sub.tag == 'increment':
+                    curr_param_dict['increment'] = ast.literal_eval(tag_string)
+                elif sub.tag in ['min', 'max']:
+                    curr_param_dict[sub.tag] = ast.literal_eval(tag_string)
+                else:
+                    pass
             elif sub.tag == 'value':
-                curr_param_dict['values'][sub.attrib['code'].strip()]=sub.text.strip()
+                if curr_param_dict['values'] is None:
+                    curr_param_dict['values'] = {}
+                curr_param_dict['values'][ast.literal_eval(sub.attrib['code'].encode('utf-8').strip())]=sub.text.encode('utf-8')
+            elif sub.tag == 'bit':
+                if curr_param_dict['bitmask'] is None:
+                    curr_param_dict['bitmask'] = {}
+                tag_string = extract_text(sub)
+                curr_param_dict['bitmask'][2**int(sub.attrib.get('index'))] = tag_string
+                curr_param_dict['type'] = 'BITMASK'
+            
+            elif sub.tag == 'boolean':
+                curr_param_dict['values'] = {bool_false: 'Disabled', bool_true:'Enabled'}
+                curr_param_dict['type'] = 'BOOLEAN'
             else:
-                # TODO sort out bitmask
                 pass
-        print(curr_param_dict)
-        
+            
+    root[curr_param_name] = curr_param_dict
+    
     pprint.pprint(root)
+    return root
 
 if __name__ == '__main__':
     from os import sys, path
@@ -117,4 +168,4 @@ if __name__ == '__main__':
     
     tree = load_param_meta('parameters')
     meta = extract_param_meta_from_tree(tree, 'test')
-    print(meta)
+    # print(meta)

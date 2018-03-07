@@ -40,6 +40,7 @@ from api.schema import UpdateParameter
 
 # utility imports
 from util.common import merge_two_dicts
+from util.mavlink import get_meta_string
 
 # ROS imports
 import rospy
@@ -51,6 +52,11 @@ from mavros_msgs.srv import StreamRate, StreamRateRequest
 from sensor_msgs.msg import NavSatFix, Imu
 from geometry_msgs.msg import PoseStamped
 from mavros_maverick.msg import Param # callboack msg on param change
+from mavros_maverick.srv import VehicleInfo
+from mavros.param import param_ret_value
+
+# PyMAVLink imports
+from pymavlink import mavutil
 
 # zeroconf placeholder
 # from zeroconf import ServiceInfo, Zeroconf # advertise available websockets to browser
@@ -144,24 +150,7 @@ class TornadoQL(tornado.web.Application):
         )
         TornadoQL.schema = schema
         super(TornadoQL, self).__init__(handlers, **settings)
-
-class ExternalFunctionCallback(object):
-    '''runs functions from other threads asynchronously within the ioloop'''
-    def __init__(self):
-        tornado.ioloop.IOLoop.current().add_callback(self.watch_queue)
-    
-    def stop(self):
-        external_fn_queue.put_nowait(None)
-
-    @tornado.gen.coroutine
-    def watch_queue(self):
-        while True:
-            ret = yield(external_fn_executor.submit(external_fn_queue.get, block=True))
-            if ret:
-                (callback, kwargs) = ret
-                callback(**kwargs)
-            else:
-                break
+            
 def add_ioloop_callback(method, **kwargs):
     tornado.ioloop.IOLoop.current().add_callback(method, **kwargs)
     
@@ -178,23 +167,24 @@ def main(config):
     server = start_server(config)
     tornado.ioloop.IOLoop.current().start()
     # this function blocks at this point until the server is asked to exit via request_server_stop()
-    if config['APP_DEBUG']:
-        print("Tornado finished")
+    app_log.debug("Tornado finished")
     # external_callback.stop()
     server.stop()
 
 def request_server_stop(config):
     # TODO: close all websocket connections (required?)
-    add_ioloop_callback(ioloop.stop)
-    if config['APP_DEBUG']:
-        print("Asked Tornado to exit")
+    ioloop = tornado.ioloop.IOLoop.current()
+    ioloop.add_callback(ioloop.stop)
+    app_log.debug("Asked Tornado to exit")
     
 class Server(object):
     def __init__(self, optsargs):
         self.exit = False
         (self.opts, self.args) = optsargs
         self.server_thread = None
-        self.connection = None
+        self.mavros_connection = None
+        self.mavlink_connection = None
+        
         # TODO: fix this config mess... 
         self.config = Configuration(self.opts.configuration)
         self.config = self.config.get_config()
@@ -204,36 +194,44 @@ class Server(object):
         self.server_thread = threading.Thread(target=main, args = (self.config,))
         self.server_thread.daemon = True
         self.server_thread.start()
+        # setup the MAVLink connection
+        self.mavlink_connection = MAVLINKConnection()
+        # setup the connection to ROS
+        self.mavros_connection = MAVROSConnection(self.config)
+        # self.server_thread.join()
         self.main_loop()
 
     def main_loop(self):
         '''main loop of the api server'''
-        # setup the connection to ROS
-        self.connection = Connection()
+
         while not self.exit:
             time.sleep(1.0)
-        print('Server finished')
+        app_log.info('Server finished')
         
-    def process_connection_in(self):
-        '''process data connection(s)'''
-        pass
         
     def exit_gracefully(self, signum, frame):
         '''called on sigterm'''
         self.exit = True
-        if self.connection:
-            self.connection.shutdown()
+        if self.mavros_connection:
+            self.mavros_connection.shutdown()
+        if self.mavlink_connection:
+            self.mavlink_connection.shutdown()
         if self.server_thread:
             # attempt to shutdown the tornado server
             request_server_stop(self.config)
             self.server_thread.join(timeout=10)
 
-class Connection(object):
-    def __init__(self):
+class MAVROSConnection(object):
+    def __init__(self, config):
+        self.config = config
+        self.info = None
+        self.meta_string = '' # meta string used to load the correct params
+        
         self.connect()
         # self.topics()
         self.streams()
-        self.params()
+        self.vehicle_info() # work out the autopilot and vehicle type
+        self.params(meta_string = self.meta_string) # this is called from the IOloop once we know the vehicle type
         self.listener()
 
     def connect(self):
@@ -267,6 +265,17 @@ class Connection(object):
         }
         for stream,rate in stream_rates.items():
             do_set_rate(rate, getattr(StreamRateRequest, stream))
+            
+    def vehicle_info(self):
+        # Create ROS service definition for VehicleInfo
+        get_vehicle_info = rospy.ServiceProxy(mavros.get_topic('get_vehicle_info'), VehicleInfo)
+        try:
+            self.info = get_vehicle_info()
+            self.meta_string = get_meta_string(self.info)
+            app_log.debug(self.info)
+            app_log.info(self.meta_string)
+        except rospy.ServiceException as ex:
+            app_log.error('An error occurred while retrieving vehicle info via ROS: {0}'.format(ex))
 
     def listener(self):
         rospy.Subscriber("/mavros/state", State, self.state_callback)
@@ -281,8 +290,7 @@ class Connection(object):
         for topic in topics:
             app_log.info(topic)
             
-    def params(self):
-        vehicle = 'ArduCopter'
+    def params(self, meta_string = 'ArduCopter'):
         # TODO: make vehicle dynamic and chosse between px4 and ardupilot
         from param.parse_param_xml import get_param_meta
         from api.schema import Parameters
@@ -301,7 +309,14 @@ class Connection(object):
             app_log.debug('param get {0}:{1}  {2}'.format(param.param_id, param.param_value, type(param.param_value)))
         
         # TODO: handle IOError when mavlink-router is not connected to the AP but mavros is running
-        param_meta_server = get_param_meta(vehicle)
+        
+        if self.config['APP_DEBUG']:
+            start_time = time.time()
+        app_log.debug('statring parameter meta fetch')
+        param_meta_server = get_param_meta(meta_string)
+        app_log.debug('finished parameter meta fetch')
+        if self.config['APP_DEBUG']:
+            app_log.debug('parameter meta fetch took {0}s'.format(time.time() - start_time))
         Parameters.meta = merge_two_dicts(param_meta_vehicle, param_meta_server)
                 
     def param_set_callback(self, param_data):
@@ -331,21 +346,18 @@ class Connection(object):
                   'nsecs':data.header.stamp.nsecs,'system_status':data.system_status,'secs':data.header.stamp.secs,
                   'connected':data.connected,'mode':data.mode,'armed':data.armed}
         tornado.ioloop.IOLoop.current().add_callback(UpdateStateMessage().mutate, **kwargs)
-        # external_fn_queue.put_nowait((UpdateStateMessage().mutate, kwargs))
-        
+
     def vfr_hud_callback(self, data):
         kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id,
                   'airspeed':data.airspeed, 'groundspeed':data.groundspeed, 'heading':data.heading,
                   'throttle':data.throttle, 'altitude':data.altitude, 'climb':data.climb}
         tornado.ioloop.IOLoop.current().add_callback(UpdateVfrHudMessage().mutate, **kwargs)
-        # external_fn_queue.put_nowait((UpdateVfrHudMessage().mutate, kwargs))
 
     def nav_sat_fix_callback(self, data):
         kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id,
                   'status_status':data.status.status, 'status_service':data.status.service, 'latitude':data.latitude, 'longitude':data.longitude,
                   'altitude':data.altitude, 'position_covariance_type':data.position_covariance_type}
         tornado.ioloop.IOLoop.current().add_callback(UpdateNavSatFixMessage().mutate, **kwargs)
-        # external_fn_queue.put_nowait((UpdateNavSatFixMessage().mutate, kwargs))
 
     def pose_stamped_callback(self, data):
         kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id,
@@ -353,21 +365,94 @@ class Connection(object):
                   'pose_orientation_x':data.pose.orientation.x,  'pose_orientation_y':data.pose.orientation.y,  'pose_orientation_z':data.pose.orientation.z,
                   'pose_orientation_w':data.pose.orientation.w}
         tornado.ioloop.IOLoop.current().add_callback(UpdatePoseStampedMessage().mutate, **kwargs)
-        # external_fn_queue.put_nowait((UpdatePoseStampedMessage().mutate, kwargs))
-    
+
     def imu_callback(self, data):
         kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id,
                   'orientation_x':data.orientation.x, 'orientation_y':data.orientation.y, 'orientation_z':data.orientation.z, 'orientation_w':data.orientation.w,
                   'angular_velocity_x':data.angular_velocity.x, 'angular_velocity_y':data.angular_velocity.y, 'angular_velocity_z':data.angular_velocity.z,
                   'linear_acceleration_x':data.linear_acceleration.x, 'linear_acceleration_y':data.linear_acceleration.y, 'linear_acceleration_z':data.linear_acceleration.z}
         tornado.ioloop.IOLoop.current().add_callback(UpdateImuMessage().mutate, **kwargs)
-        # external_fn_queue.put_nowait((UpdateImuMessage().mutate, kwargs))
-    
+
     def param_callback(self, data):
-        app_log.debug('param callback data: {0}  value type: {1} '.format(data, type(data.param_value)))
-        kwargs = {'id':data.param_id,'value':data.param_value}
+        # app_log.debug('param callback data: {0}  value type: {1} '.format(data, type(data.value)))
+        kwargs = {'id':data.param_id,'value':param_ret_value(data)}
         tornado.ioloop.IOLoop.current().add_callback(UpdateParameter().mutate, **kwargs)
-        # external_fn_queue.put_nowait((UpdateParameter().mutate, kwargs))
+
+class Connection(object):
+    def __init__(self, connection):
+        self.control_connection = connection # a MAVLink connection
+        self.control_link = self.control_connection.mav
+
+class MAVLINKConnection(object):
+    def __init__(self, connection_str = 'tcp:127.0.0.1:5780'):
+        import threading
+        self.exit = False
+        try:
+            self.connection = Connection(mavutil.mavlink_connection(connection_str))
+            self.connection.control_connection.message_hooks.append(self.handle_msg)
+        except Exception as e:
+            app_log.error("Failed to connect to {0} : {1)".format(self.connection_str, e))
+            # TODO: treat this as a stop condition?
+            return 1
+        
+        self.autopilot_string = ''
+        self.vehicle_string = ''
+        self.params_updated = None
+        
+        self.main_thread = threading.Thread(target=self.main)
+        self.main_thread.daemon = True
+        self.main_thread.start()
+        
+    def shutdown(self):
+        self.exit = True
+    
+    def process_connection_in(self):
+        '''receive MAVLink messages'''
+        try:
+            inputready,outputready,exceptready = select.select([self.connection.control_connection.port],[],[],0.1)
+            # block for 0.1 sec if there is nothing on the connection
+            # otherwise we just dive right in...
+            for s in inputready: 
+                self.connection.control_connection.recv_msg()
+            # mavlink buffer is never getting cleared
+            # force clear the buffer to avoid memory leak
+            if self.connection.control_connection.mav.buf_len() == 0 and self.connection.control_connection.mav.buf_index != 0:
+                self.connection.control_connection.mav.buf = bytearray()
+                self.connection.control_connection.mav.buf_index = 0
+        except select.error:
+            pass
+    
+    def main(self):
+        while not self.exit:
+            self.process_connection_in() # any down time (max 0.1 sec) occurs here
+    
+    def start_param_update(self, vehicle, force = False):
+        if (not self.params_updated or force):
+            pass
+            
+    
+    def set_autopilot_string(self, msg):
+        self.autopilot_string = mavutil.mavlink.enums['MAV_AUTOPILOT'][msg.autopilot].description
+        
+    def set_vehicle_string(self, msg):
+        self.vehicle_string = mavutil.mavlink.enums['MAV_TYPE'][msg.type].description
+    
+    def handle_msg(self, con, msg):
+        '''callback for received MAVLink messages''' 
+        src_system = msg.get_srcSystem()
+        src_component = msg.get_srcComponent()
+        # if msg.get_type() == 'HEARTBEAT':
+        #     app_log.debug((src_system, src_component))
+        #     app_log.debug(msg)
+
+        if src_system == 1:
+            if msg.get_type() == 'HEARTBEAT':
+                meta_string = get_meta_string(msg)
+            else:
+                # message type not handleded 
+                pass
+    
+    
 
 if __name__ == '__main__':
     from optparse import OptionParser

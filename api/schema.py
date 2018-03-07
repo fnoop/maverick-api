@@ -4,7 +4,7 @@ from graphene.types import Scalar
 from graphql.language import ast
 
 from rx.subjects import Subject
-import re, fnmatch, numbers, json
+import re, fnmatch, numbers, json, ast
 
 from decimal import *
 
@@ -40,11 +40,11 @@ class ParamValueType(Scalar):
     def serialize(value):
         # logger.debug('serialize {0}  {1}'.format(value, type(value)))
         if isinstance(value, numbers.Integral):
-            return str(value)
+            return value
         else:
             try:
                 value = round(value, 6)
-                return format(Decimal(str(value)), 'f')
+                return ast.literal_eval(format(Decimal(str(value)), 'f'))
                 # return format(round(value, 5), 'f')
             except Exception as e:
                 logger.error('serialize failed {0}:{1} {2}'.format(value, type(value), e))
@@ -62,38 +62,78 @@ class ParamValueType(Scalar):
 ### end graphql param value type
 
 class ParamMetaInputSchema(graphene.InputObjectType):
-    human_name = graphene.String()
-    user = graphene.String()
+    bitmask = graphene.types.json.JSONString()
+    decimal = ParamValueType()
     documentation = graphene.String()
-    values = graphene.types.json.JSONString()
-    fields = graphene.types.json.JSONString()
     group = graphene.String()
+    humanGroup = graphene.String()
+    humanName = graphene.String()
+    increment = ParamValueType()
+    max = ParamValueType()
+    min = ParamValueType()
+    rebootRequired = graphene.Boolean()
+    type = graphene.String()
+    unitText = graphene.String()
+    units = graphene.String()
+    values = graphene.types.json.JSONString()
     
 class ParameterMeta(graphene.ObjectType):
-    human_name = graphene.String()
-    user = graphene.String()
+    bitmask = graphene.types.json.JSONString()
+    decimal = ParamValueType()
     documentation = graphene.String()
-    values = graphene.types.json.JSONString()
-    fields = graphene.types.json.JSONString()
     group = graphene.String()
+    humanGroup = graphene.String()
+    humanName = graphene.String()
+    increment = ParamValueType()
+    max = ParamValueType()
+    min = ParamValueType()
+    rebootRequired = graphene.Boolean()
+    type = graphene.String()
+    unitText = graphene.String()
+    units = graphene.String()
+    values = graphene.types.json.JSONString()
 
-    def resolve_human_name(self, info):
-        return self.get('humanName', None)
+    def resolve_bitmask(self, info):
+        return self.get('bitmask', None)
         
-    def resolve_user(self,info):
-        return self.get('user', None)
+    def resolve_decimal(self, info):
+        return self.get('decimal', None)
         
     def resolve_documentation(self, info):
         return self.get('documentation', None)
     
-    def resolve_values(self, info):
-        return self.get('values', None)
-    
-    def resolve_fields(self, info):
-        return self.get('fields', None)
-    
     def resolve_group(self, info):
         return self.get('group', None)
+    
+    def resolve_humanGroup(self, info):
+        return self.get('humanGroup', None)
+    
+    def resolve_humanName(self, info):
+        return self.get('humanName', None)
+    
+    def resolve_increment(self, info):
+        return self.get('increment', None)
+    
+    def resolve_max(self, info):
+        return self.get('max', None)
+    
+    def resolve_min(self, info):
+        return self.get('min', None)
+    
+    def resolve_rebootRequired(self, info):
+        return self.get('rebootRequired', None)
+    
+    def resolve_type(self, info):
+        return self.get('type', None)
+    
+    def resolve_unitText(self, info):
+        return self.get('unitText', None)
+    
+    def resolve_units(self, info):
+        return self.get('units', None)
+    
+    def resolve_values(self, info):
+        return self.get('values', None)
 
 class Parameter(graphene.ObjectType):
     id = graphene.ID()
