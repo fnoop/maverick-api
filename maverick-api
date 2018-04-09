@@ -20,7 +20,6 @@ import queue
 from uuid import uuid4 # used to generate unique IDs
 import datetime
 
-
 # tornado imports
 import tornado.web
 from tornado import gen
@@ -37,6 +36,7 @@ from api.schema import UpdateStateMessage, UpdateVfrHudMessage
 from api.schema import UpdatePoseStampedMessage, UpdateNavSatFixMessage
 from api.schema import UpdateImuMessage
 from api.schema import UpdateParameter
+from api.schema import UpdateWaypoint
 
 # utility imports
 from util.common import merge_two_dicts
@@ -51,9 +51,10 @@ from mavros_msgs.msg import State, VFR_HUD
 from mavros_msgs.srv import StreamRate, StreamRateRequest
 from sensor_msgs.msg import NavSatFix, Imu
 from geometry_msgs.msg import PoseStamped
-from mavros_maverick.msg import Param # callboack msg on param change
+from mavros_maverick.msg import Param # callback msg on param change
 from mavros_maverick.srv import VehicleInfo
 from mavros.param import param_ret_value
+from mavros import mission
 
 # PyMAVLink imports
 from pymavlink import mavutil
@@ -63,7 +64,6 @@ from pymavlink import mavutil
 
 external_fn_queue = queue.Queue()
 external_fn_executor = ThreadPoolExecutor(max_workers=1)
-
 
 # setup logging
 handler = RotatingFileHandler('tornado.log', mode='a', maxBytes=1*1024*1024, backupCount=2, encoding=None, delay=0)
@@ -223,15 +223,18 @@ class Server(object):
 
 class MAVROSConnection(object):
     def __init__(self, config):
+        # Attributes
         self.config = config
         self.info = None
         self.meta_string = '' # meta string used to load the correct params
-        
+        self.waypoints = None
+        # Methods
         self.connect()
         # self.topics()
         self.streams()
         self.vehicle_info() # work out the autopilot and vehicle type
         self.params(meta_string = self.meta_string) # this is called from the IOloop once we know the vehicle type
+        self.mission_waypoints()
         self.listener()
 
     def connect(self):
@@ -258,7 +261,7 @@ class MAVROSConnection(object):
             'STREAM_EXTENDED_STATUS': 5,
             'STREAM_RC_CHANNELS': 5,
             'STREAM_RAW_CONTROLLER': 5,
-            'STREAM_POSITION': 5, # POSE
+            'STREAM_POSITION': 10, # POSE
             'STREAM_EXTRA1': 10, # IMU
             'STREAM_EXTRA2': 5, # VFR_HUD
             'STREAM_EXTRA3': 1
@@ -276,6 +279,10 @@ class MAVROSConnection(object):
             app_log.info(self.meta_string)
         except rospy.ServiceException as ex:
             app_log.error('An error occurred while retrieving vehicle info via ROS: {0}'.format(ex))
+
+    def mission_waypoints(self):
+        self.waypoints = mission.pull()
+        mission.subscribe_waypoints(self.mission_callback)
 
     def listener(self):
         rospy.Subscriber("/mavros/state", State, self.state_callback)
@@ -377,6 +384,13 @@ class MAVROSConnection(object):
         # app_log.debug('param callback data: {0}  value type: {1} '.format(data, type(data.value)))
         kwargs = {'id':data.param_id,'value':param_ret_value(data)}
         tornado.ioloop.IOLoop.current().add_callback(UpdateParameter().mutate, **kwargs)
+
+    def mission_callback(self, data):
+        for seq, waypoint in enumerate(data.waypoints):
+            kwargs = {'seq': seq, 'frame': waypoint.frame, 'command': waypoint.command, 'is_current': waypoint.is_current, 'autocontinue': waypoint.autocontinue,
+                'param1': waypoint.param1, 'param2': waypoint.param2, 'param3': waypoint.param3, 'param4': waypoint.param4, 'latitude': waypoint.x_lat, 'longitude': waypoint.y_long,
+                'altitude': waypoint.z_alt}
+            tornado.ioloop.IOLoop.current().add_callback(UpdateWaypoint().mutate, **kwargs)
 
 class Connection(object):
     def __init__(self, connection):

@@ -181,6 +181,72 @@ class TelemMessage(graphene.Interface):
     nsecs = graphene.Int()
     frame_id = graphene.String()
 
+class Waypoints:
+    waypoints = {}
+    meta = {}
+    callback = None
+    
+    @property
+    def waypoint_count():
+        return len(Waypoints.waypoints)
+
+class Waypoint(graphene.ObjectType):
+    id = graphene.ID()
+    is_current = graphene.Boolean()
+    autocontinue = graphene.Boolean()
+    frame = graphene.Int()
+    command = graphene.Int()
+    param1 = graphene.Float()
+    param2 = graphene.Float()
+    param3 = graphene.Float()
+    param4 = graphene.Float()
+    latitude = graphene.Float()
+    longitude = graphene.Float()
+    altitude = graphene.Float()
+
+    @classmethod
+    def create(cls, seq, is_current, autocontinue, frame, command, param1, param2, param3, param4, latitude, longitude, altitude):
+        waypoint = cls(id=seq, is_current=is_current, frame=frame, command=command, param1=param1, param2=param2, param3=param3, param4=param4, latitude=latitude, longitude=longitude, altitude=altitude)
+        return waypoint
+
+class UpdateWaypoint(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID()
+        is_current = graphene.Boolean()
+        autocontinue = graphene.Boolean()
+        frame = graphene.Int()
+        command = graphene.Int()
+        param1 = graphene.Float()
+        param2 = graphene.Float()
+        param3 = graphene.Float()
+        param4 = graphene.Float()
+        latitude = graphene.Float()
+        longitude = graphene.Float()
+        altitude = graphene.Float()
+        
+    ok = graphene.Boolean()
+    waypoint = graphene.Field(lambda: Waypoint)
+
+    def mutate(self, info = None, **kwargs):
+        logger.debug('UpdateWaypoint.mutate() info:{0} kwargs:{1}'.format(info, kwargs))
+        if (info and Waypoints.callback):
+            # we only have info if the graphql mutate call was made from the
+            # browser (not maverick-api directly)
+            ret_val = Waypoints.callback(kwargs) # this calls waypoint set
+            logger.debug('UpdateWaypoint.ret_val: {}'.format(ret_val))
+            # TODO: need to verify the set command worked as requested
+            #kwargs['value'] = ret_val
+
+        waypoint = Waypoint.create(**kwargs)
+        # add / update the waypoint in the local storage
+        Waypoints.waypoints[kwargs['seq']] = waypoint
+        # TODO: Commit waypoints to FC
+        ok = True
+        # notify subscribers of an update
+        Subscriptions.stream['Waypoint'].on_next(waypoint)
+        if info:
+            return UpdateWaypoint(waypoint=waypoint, ok=ok)
+
 ### start State Message
 class StateMessage(graphene.ObjectType):
     class Meta:
@@ -321,8 +387,7 @@ class UpdatePoseStampedMessage(graphene.Mutation):
         # notify subscribers of an update
         Subscriptions.stream['PoseStamped'].on_next(pose_stamped_message)
         if info:
-            return UpdatePoseStampedMessage(pose_stamped_message=pose_stamped_message, ok=ok)
-            
+            return UpdatePoseStampedMessage(pose_stamped_message=pose_stamped_message, ok=ok)       
 ### end PoseStamped Message
 
 ### start Imu Message
@@ -442,6 +507,7 @@ class Mutation(graphene.ObjectType):
     update_nav_sat_fix_message = UpdateNavSatFixMessage.Field()
     update_imu_message = UpdateImuMessage.Field()
     update_param = UpdateParameter.Field()
+    update_waypoint = UpdateWaypoint.Field()
 
 class Query(graphene.ObjectType):
     state_message = graphene.Field(StateMessage)
@@ -450,7 +516,12 @@ class Query(graphene.ObjectType):
     nav_sat_fix_message = graphene.Field(NavSatFixMessage)
     imu_message = graphene.Field(ImuMessage)
     params = graphene.List(Parameter, meta = ParamMetaInputSchema(), query=graphene.List(graphene.String))
-    
+    waypoints = graphene.List(Waypoint, query=graphene.List(graphene.String))
+
+    def resolve_waypoints(self, info):
+        waypoint_list = Waypoints.waypoints.values()
+        return sorted(waypoint_list, key=lambda waypoint: waypoint.id)
+
     def resolve_params(self, info, query= ['*']):
         param_list = []
         # TODO: check to see if we have a valid parameter list
@@ -500,6 +571,7 @@ class Subscription(graphene.ObjectType):
     nav_sat_fix_message = graphene.Field(NavSatFixMessage)
     imu_message = graphene.Field(ImuMessage)
     params = graphene.Field(Parameter)
+    waypoints = graphene.Field(Waypoint)
 
     def resolve_state_message(self, info):
         return Subscriptions.stream['State']
@@ -518,6 +590,9 @@ class Subscription(graphene.ObjectType):
         
     def resolve_params(self, info):
         return Subscriptions.stream['Param']
+
+    def resolve_waypoints(self, info):
+        return Subscriptions.stream['Waypoint']
         
 schema = graphene.Schema(query=Query, mutation=Mutation, subscription=Subscription)
 
@@ -613,3 +688,4 @@ Subscriptions.stream['PoseStamped'] = Subject()
 Subscriptions.stream['NavSatFix'] = Subject()
 Subscriptions.stream['Imu'] = Subject()
 Subscriptions.stream['Param'] = Subject()
+Subscriptions.stream['Waypoint'] = Subject()
