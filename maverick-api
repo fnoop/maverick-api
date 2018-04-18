@@ -37,6 +37,7 @@ from api.schema import UpdatePoseStampedMessage, UpdateNavSatFixMessage
 from api.schema import UpdateImuMessage
 from api.schema import UpdateParameter
 from api.schema import UpdateWaypoint
+from api.schema import UpdateStatusTextMessage
 
 # utility imports
 from util.common import merge_two_dicts
@@ -47,6 +48,7 @@ import rospy
 import mavros
 import mavros.utils
 from std_msgs.msg import String
+from rosgraph_msgs.msg import Log
 from mavros_msgs.msg import State, VFR_HUD
 from mavros_msgs.srv import StreamRate, StreamRateRequest
 from sensor_msgs.msg import NavSatFix, Imu
@@ -256,6 +258,7 @@ class MAVROSConnection(object):
                 except rospy.ServiceException as ex:
                     fault(ex)
         # Request streams
+        """
         stream_rates = {
             'STREAM_RAW_SENSORS': 5,
             'STREAM_EXTENDED_STATUS': 5,
@@ -264,6 +267,17 @@ class MAVROSConnection(object):
             'STREAM_POSITION': 10, # POSE
             'STREAM_EXTRA1': 10, # IMU
             'STREAM_EXTRA2': 5, # VFR_HUD
+            'STREAM_EXTRA3': 1
+        }
+        """
+        stream_rates = {
+            'STREAM_RAW_SENSORS': 1,
+            'STREAM_EXTENDED_STATUS': 1,
+            'STREAM_RC_CHANNELS': 1,
+            'STREAM_RAW_CONTROLLER': 1,
+            'STREAM_POSITION': 1, # POSE
+            'STREAM_EXTRA1': 1, # IMU
+            'STREAM_EXTRA2': 1, # VFR_HUD
             'STREAM_EXTRA3': 1
         }
         for stream,rate in stream_rates.items():
@@ -291,6 +305,8 @@ class MAVROSConnection(object):
         rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.pose_stamped_callback)
         rospy.Subscriber("/mavros/imu/data", Imu, self.imu_callback)
         rospy.Subscriber("/mavros/param_value", Param, self.param_callback)
+        rospy.Subscriber('/rosout', Log, self.statustext_callback)
+
     
     def topics(self):
         topics = rospy.get_published_topics()
@@ -319,7 +335,7 @@ class MAVROSConnection(object):
         
         if self.config['APP_DEBUG']:
             start_time = time.time()
-        app_log.debug('statring parameter meta fetch')
+        app_log.debug('starting parameter meta fetch')
         param_meta_server = get_param_meta(meta_string)
         app_log.debug('finished parameter meta fetch')
         if self.config['APP_DEBUG']:
@@ -391,6 +407,12 @@ class MAVROSConnection(object):
                 'param1': waypoint.param1, 'param2': waypoint.param2, 'param3': waypoint.param3, 'param4': waypoint.param4, 'latitude': waypoint.x_lat, 'longitude': waypoint.y_long,
                 'altitude': waypoint.z_alt}
             tornado.ioloop.IOLoop.current().add_callback(UpdateWaypoint().mutate, **kwargs)
+
+    def statustext_callback(self, data):
+        if data.name == '/mavros':
+            app_log.debug('statustext: {0}:{1}'.format(data.level, data.msg))
+            kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id, 'level':data.level, 'message':data.msg}
+            tornado.ioloop.IOLoop.current().add_callback(UpdateStatusTextMessage().mutate, **kwargs)
 
 class Connection(object):
     def __init__(self, connection):

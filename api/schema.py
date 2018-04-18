@@ -171,8 +171,8 @@ class UpdateParameter(graphene.Mutation):
         ok = True
         # notify subscribers of an update
         Subscriptions.stream['Param'].on_next(param)
-        if info:
-            return UpdateParameter(param=param, ok=ok)
+        #if info:
+        #    return UpdateParameter(param=param, ok=ok)
 
 class TelemMessage(graphene.Interface):
     id = graphene.ID()
@@ -233,7 +233,7 @@ class UpdateWaypoint(graphene.Mutation):
             # we only have info if the graphql mutate call was made from the
             # browser (not maverick-api directly)
             ret_val = Waypoints.callback(kwargs) # this calls waypoint set
-            logger.debug('UpdateWaypoint.ret_val: {}'.format(ret_val))
+            logger.debug('UpdateWaypoint.ret_val: {} : {}'.format(info, ret_val))
             # TODO: need to verify the set command worked as requested
             #kwargs['value'] = ret_val
 
@@ -500,6 +500,43 @@ class UpdateNavSatFixMessage(graphene.Mutation):
             return UpdateNavSatFixMessage(nav_sat_fix_message=nav_sat_fix_message, ok=ok)
 ### end NavSatFix Message
 
+### start StatusText Message
+class StatusTextMessage(graphene.ObjectType):
+    class Meta:
+        interfaces = (TelemMessage, )
+    level = graphene.Int()
+    message = graphene.String()
+    
+    @classmethod
+    def create(cls, seq, secs, nsecs, frame_id, level, message):
+        _id = 'StatusText'
+        status_text_message = cls(id=_id, seq = seq, secs = secs, nsecs = nsecs, frame_id = frame_id, level = level, message = message)
+        # update the local storage content
+        StreamState.stream[_id] = status_text_message
+        return status_text_message
+    
+class UpdateStatusTextMessage(graphene.Mutation):
+    class Arguments:
+        id = graphene.ID()
+        seq = graphene.Int()
+        secs = graphene.Int()
+        nsecs = graphene.Int()
+        frame_id = graphene.String()
+        level = graphene.Int()
+        message = graphene.String()
+
+    ok = graphene.Boolean()
+    status_text_message = graphene.Field(lambda: StatusTextMessage)
+    
+    def mutate(self, info = None, **kwargs):
+        status_text_message = StatusTextMessage.create(**kwargs)
+        ok = True
+        # notify subscribers of an update
+        Subscriptions.stream['StatusText'].on_next(status_text_message)
+        if info:
+            return UpdateStatusTextMessage(status_text_message=status_text_message, ok=ok)
+### end StatusText Message
+
 class Mutation(graphene.ObjectType):
     update_state_message = UpdateStateMessage.Field()
     update_vfr_hud_message = UpdateVfrHudMessage.Field()
@@ -508,6 +545,7 @@ class Mutation(graphene.ObjectType):
     update_imu_message = UpdateImuMessage.Field()
     update_param = UpdateParameter.Field()
     update_waypoint = UpdateWaypoint.Field()
+    update_status_text_message = UpdateStatusTextMessage.Field()
 
 class Query(graphene.ObjectType):
     state_message = graphene.Field(StateMessage)
@@ -517,6 +555,7 @@ class Query(graphene.ObjectType):
     imu_message = graphene.Field(ImuMessage)
     params = graphene.List(Parameter, meta = ParamMetaInputSchema(), query=graphene.List(graphene.String))
     waypoints = graphene.List(Waypoint, query=graphene.List(graphene.String))
+    status_text_message = graphene.Field(StatusTextMessage)
 
     def resolve_waypoints(self, info):
         waypoint_list = Waypoints.waypoints.values()
@@ -563,6 +602,9 @@ class Query(graphene.ObjectType):
     
     def resolve_imu_message(self, info):
         return StreamState.stream['Imu']
+
+    def resolve_status_text_message(self, info):
+        return StreamState.stream['StatusText']
   
 class Subscription(graphene.ObjectType):
     state_message = graphene.Field(StateMessage)
@@ -572,6 +614,7 @@ class Subscription(graphene.ObjectType):
     imu_message = graphene.Field(ImuMessage)
     params = graphene.Field(Parameter)
     waypoints = graphene.Field(Waypoint)
+    status_text_message = graphene.Field(StatusTextMessage)
 
     def resolve_state_message(self, info):
         return Subscriptions.stream['State']
@@ -593,7 +636,10 @@ class Subscription(graphene.ObjectType):
 
     def resolve_waypoints(self, info):
         return Subscriptions.stream['Waypoint']
-        
+
+    def resolve_status_text_message(self, info):
+        return Subscriptions.stream['StatusText']
+
 schema = graphene.Schema(query=Query, mutation=Mutation, subscription=Subscription)
 
 state_message = StateMessage(
@@ -670,6 +716,16 @@ imu_message = ImuMessage(
     linear_acceleration_z = None, # graphene.Float()
 )
 
+status_text_message = StatusTextMessage(
+    id = 'StatusText',
+    seq = None, # graphene.Int()
+    secs = None, # graphene.Int()
+    nsecs = None, # graphene.Int()
+    frame_id = None, # graphene.String()
+    level = None, # graphene.Int()
+    message = None # graphene.String()
+)
+
 # init the state message
 StreamState.stream['State'] = state_message
 # init the VfrHud message
@@ -680,6 +736,8 @@ StreamState.stream['PoseStamped'] = pose_stamped_message
 StreamState.stream['NavSatFix'] = nav_sat_fix_message
 # init the imu message
 StreamState.stream['Imu'] = imu_message
+# init the statustext message
+StreamState.stream['StatusText'] = status_text_message
 
 # add Subjects for all message types
 Subscriptions.stream['State'] = Subject()
@@ -689,3 +747,4 @@ Subscriptions.stream['NavSatFix'] = Subject()
 Subscriptions.stream['Imu'] = Subject()
 Subscriptions.stream['Param'] = Subject()
 Subscriptions.stream['Waypoint'] = Subject()
+Subscriptions.stream['StatusText'] = Subject()
