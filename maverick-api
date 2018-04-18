@@ -197,7 +197,7 @@ class Server(object):
         self.server_thread.daemon = True
         self.server_thread.start()
         # setup the MAVLink connection
-        self.mavlink_connection = MAVLINKConnection()
+        # self.mavlink_connection = MAVLINKConnection()
         # setup the connection to ROS
         self.mavros_connection = MAVROSConnection(self.config)
         # self.server_thread.join()
