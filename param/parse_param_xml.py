@@ -13,20 +13,24 @@ import os
 import ast
 import re
 
-# define what will be encoded and sent to the web ui for a bool, True or 1 and False or 0
+# Define what will be encoded and sent to the web ui for a bool, True or 1 and False or 0
 bool_true = 1 # True
 bool_false = 0 # False
 
 vehicles = ['APMrover2', 'ArduCopter', 'ArduPlane', 'ArduSub', 'AntennaTracker', 'PX4']
 
 def get_ardupilot_url(vehicle):
+    '''Return a formatted url to target a .xml on the ardupilot auto test server'''
     return 'http://autotest.ardupilot.org/Parameters/{0}/apm.pdef.xml'.format(vehicle)
 
 def test_file_age(file_path, max_age):
+    '''Check the age of a file in seconds and test if it is under the maximum limit'''
     sec = file_age_in_seconds(file_path)
     if (sec is not None and sec <= max_age):
+        # The file age is less than the allowable limit
         return True
     else:
+        # The file did not exist or exceeded the maximum age limit
         return False
                     
 def get_param_meta(vehicle, remote = True, force_download = False, max_age = 60*60):
@@ -36,7 +40,6 @@ def get_param_meta(vehicle, remote = True, force_download = False, max_age = 60*
     else:
         if 'PX4' in vehicle:
             remote = False # PX4 does not support remote download of param meta
-            
     if remote:
         # check to see if we have a recent file from the server
         dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -69,6 +72,7 @@ def get_param_meta(vehicle, remote = True, force_download = False, max_age = 60*
         return extract_param_meta_from_tree(tree, vehicle)
         
 def save_param_meta(tree, file_name, dir_path = None):
+    '''Write a tree structure to a local .xml file'''
     if tree is None:
         return False
     if not dir_path:
@@ -80,6 +84,7 @@ def save_param_meta(tree, file_name, dir_path = None):
         fid.write(param_meta_data)
     
 def download_param_meta(url, timeout = (3.0, 5.0)): # 3 second connect and 5 second read timeout
+    '''Download a .xml file from a remote server and return the tree structure''' 
     print('Downloading meta from {0}'.format(url))
     tree = None
     try:
@@ -91,6 +96,7 @@ def download_param_meta(url, timeout = (3.0, 5.0)): # 3 second connect and 5 sec
         return tree
         
 def load_param_meta(file_name, dir_path = None):
+    '''Load a param meta .xml file and return the tree structure'''
     tree = None
     if not dir_path:
         dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -105,11 +111,13 @@ def load_param_meta(file_name, dir_path = None):
         return None
 
 def extract_text(node):
+    '''Sanitize string white space'''
     return re.sub('\s+',' ',node.text) # replace newlines, tabs and white space with single space
         
 def run_bool_test(curr_param):
-    if (curr_param['values'] is not None and curr_param['type'] is not 'BITMASK'):
-        if len(curr_param['values']) == 2 and curr_param['values'].keys() == [0,1]:
+    '''Ardu* specific test to see if a set of values should be a boolean type'''
+    if (curr_param['values'] is not None and curr_param['type'] is not 'BITMASK'): # Don't try to turn bitmasks into bools
+        if len(curr_param['values']) == 2 and curr_param['values'].keys() == [0,1]: # Can only contain two keys and they must be 0 and 1
             if (('DISA' in curr_param['values'][0].upper() and 'ENAB' in curr_param['values'][1].upper())
             or ('NORM' in curr_param['values'][0].upper() and 'REVE' in curr_param['values'][1].upper())):
                 curr_param['values'] = {bool_true:curr_param['values'][1], bool_false:curr_param['values'][0]}
@@ -117,14 +125,18 @@ def run_bool_test(curr_param):
     return curr_param
     
 def extract_param_meta_from_tree(tree, vehicle):
+    '''Single entry point for parsing param meta files'''
     if 'PX4' in vehicle:
+        # It's PX4
         meta = extract_param_meta_from_tree_px4(tree, vehicle)
     else:
+        # It's Ardu*
         meta = extract_param_meta_from_tree_ardupilot(tree, vehicle)
     print('Obtained meta for {0} params'.format(len(meta)))
     return meta
     
 def extract_param_meta_from_tree_px4(tree, vehicle):
+    '''Parse a PX4 param meta file'''
     if tree is None:
         print('Error: No valid tree')
         return {}
@@ -209,6 +221,7 @@ def extract_param_meta_from_tree_px4(tree, vehicle):
     return root
     
 def extract_param_meta_from_tree_ardupilot(tree, vehicle):
+    '''Parse an Ardu param meta file'''
     if tree is None:
         print('Error: No valid tree')
         return {}
@@ -310,7 +323,11 @@ def extract_param_meta_from_tree_ardupilot(tree, vehicle):
     return meta
 
 def download_and_save_all_param_meta(timeout = 60):
+    '''Try to download all param meta from ardupilot auto test server'''
     for vehicle in vehicles:
+        if 'PX4' in vehicle:
+            # PX4 does not support parm meta downloading
+            continue
         url = get_ardupilot_url(vehicle)
         tree = download_param_meta(url, timeout = timeout)
         save_param_meta(tree, file_name = vehicle)
@@ -319,8 +336,9 @@ if __name__ == '__main__':
     from os import sys, path
     sys.path.append(path.dirname(path.dirname(path.abspath(__file__))))
     
+    # randomly select a vehicle and obtain the meta for its params
     vehicle = random.choice(vehicles)
     print(vehicle)
     meta = get_param_meta(vehicle, remote = True)
-    # print(meta)
+    # pprint.pprint(meta)
     # download_and_save_all_param_meta()
