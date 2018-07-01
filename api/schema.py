@@ -3,6 +3,12 @@ import graphene
 from graphene.types import Scalar
 from graphql.language import ast
 
+# SQLAlchemy imports
+from sqlalchemy import *
+from sqlalchemy.orm import (scoped_session, sessionmaker, relationship, backref)
+from sqlalchemy.ext.declarative import declarative_base
+from graphene_sqlalchemy import SQLAlchemyObjectType
+
 from rx.subjects import Subject
 import re, fnmatch, numbers, json, ast
 
@@ -537,6 +543,28 @@ class UpdateStatusTextMessage(graphene.Mutation):
             return UpdateStatusTextMessage(status_text_message=status_text_message, ok=ok)
 ### end StatusText Message
 
+### Start MavlogEntry Message
+engine = create_engine('sqlite://///srv/maverick/data/analysis/mavlog-meta.db', convert_unicode=True)
+db_session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
+Base = declarative_base()
+Base.query = db_session.query_property()
+class MavlogModel(Base):
+    __tablename__ = 'logfiles'
+    id = Column(Integer, primary_key=True)
+    filename = Column(String)
+    start = Column(String)
+    finish = Column(String)
+    source = Column(String)
+    ekf2 = Column(Integer)
+    ekf3 = Column(Integer)
+    ekf2ekf3 = Column(Integer)
+    description = Column(String)
+    state = Column(String)
+class Mavlog(SQLAlchemyObjectType):
+    class Meta:
+        model = MavlogModel
+### end MavlogEntry Message
+
 class Mutation(graphene.ObjectType):
     update_state_message = UpdateStateMessage.Field()
     update_vfr_hud_message = UpdateVfrHudMessage.Field()
@@ -556,6 +584,11 @@ class Query(graphene.ObjectType):
     params = graphene.List(Parameter, meta = ParamMetaInputSchema(), query=graphene.List(graphene.String))
     waypoints = graphene.List(Waypoint, query=graphene.List(graphene.String))
     status_text_message = graphene.Field(StatusTextMessage)
+    mavlogs = graphene.List(Mavlog)
+
+    def resolve_mavlogs(self, info):
+        query = Mavlog.get_query(info)
+        return query.all()
 
     def resolve_waypoints(self, info):
         waypoint_list = Waypoints.waypoints.values()

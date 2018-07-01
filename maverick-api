@@ -61,6 +61,11 @@ from mavros import mission
 # PyMAVLink imports
 from pymavlink import mavutil
 
+# SQLAlchemy imports
+from sqlalchemy import *
+from sqlalchemy.orm import (scoped_session, sessionmaker, relationship, backref)
+from sqlalchemy.ext.declarative import declarative_base
+
 # zeroconf placeholder
 # from zeroconf import ServiceInfo, Zeroconf # advertise available websockets to browser
 
@@ -200,6 +205,7 @@ class Server(object):
         # self.mavlink_connection = MAVLINKConnection()
         # setup the connection to ROS
         self.mavros_connection = MAVROSConnection(self.config)
+        #self.mavlog_connection = MAVLOGConnection(self.config)
         # self.server_thread.join()
         self.main_loop()
 
@@ -209,7 +215,6 @@ class Server(object):
         while not self.exit:
             time.sleep(1.0)
         app_log.info('Server finished')
-        
         
     def exit_gracefully(self, signum, frame):
         '''called on sigterm'''
@@ -306,7 +311,6 @@ class MAVROSConnection(object):
         rospy.Subscriber("/mavros/imu/data", Imu, self.imu_callback)
         rospy.Subscriber("/mavros/param_value", Param, self.param_callback)
         rospy.Subscriber('/rosout', Log, self.statustext_callback)
-
     
     def topics(self):
         topics = rospy.get_published_topics()
@@ -413,6 +417,20 @@ class MAVROSConnection(object):
             app_log.debug('statustext: {0}:{1}'.format(data.level, data.msg))
             kwargs = {'seq':data.header.seq, 'secs':data.header.stamp.secs, 'nsecs':data.header.stamp.nsecs, 'frame_id':data.header.frame_id, 'level':data.level, 'message':data.msg}
             tornado.ioloop.IOLoop.current().add_callback(UpdateStatusTextMessage().mutate, **kwargs)
+
+"""
+class MAVLOGConnection(object):
+    def __init__(self, config):
+        # Attributes
+        self.config = config
+        self.info = None
+        self.connect()
+
+    def connect(self):
+        self.engine = create_engine('sqlite://///srv/maverick/data/analysis/mavlog-meta.db', convert_unicode=True)
+        self.db_session = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=self.engine))
+""" 
+
 
 class Connection(object):
     def __init__(self, connection):
