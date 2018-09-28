@@ -261,7 +261,7 @@ class MAVROSConnection(object):
                     set_rate(stream_id=stream_id, message_rate=stream_rate, on_off=(stream_rate != 0))
                     app_log.debug('Set stream {} rate {}'.format(stream_id, stream_rate))
                 except rospy.ServiceException as ex:
-                    fault(ex)
+                    app_log.error('An error occurred while setting vehicle stream rates via ROS: {0}'.format(ex))
         # Request streams
         """
         stream_rates = {
