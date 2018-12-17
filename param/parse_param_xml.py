@@ -290,8 +290,11 @@ def extract_param_meta_from_tree_ardupilot(tree, vehicle):
                     bitmask_text = sub.text.strip().rstrip(',')
                     bitmask_ents = bitmask_text.split(',')
                     for ent in bitmask_ents:
-                        [idx, val] = ent.split(':')
-                        curr_param_dict['bitmask'][2**int(idx.strip())] = val.strip()
+                        try:
+                            [idx, val] = ent.split(':')
+                            curr_param_dict['bitmask'][2**int(idx.strip())] = val.strip()
+                        except:
+                            pass
                     curr_param_dict['type'] = 'BITMASK'
                 else:
                     pass
