@@ -17,7 +17,6 @@ pipeline {
       }
       steps {
         echo 'Deploying only because this commit is tagged...'
-        git(url: 'https://github.com/goodrobots/maverick-api.git', branch: 'stable', changelog: true)
       }
     }
   }
